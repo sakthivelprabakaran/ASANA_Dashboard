@@ -1,0 +1,782 @@
+#!/usr/bin/env python3
+"""
+Asana CSV Generator V2 - Enhanced PyQt5 Application
+Features:
+- Excel template import for bulk task creation
+- Device-specific task filtering
+- BRD data lookup for performance metrics
+- User-friendly interface
+"""
+
+import sys
+import csv
+from datetime import datetime
+import pandas as pd
+from pathlib import Path
+from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
+                            QHBoxLayout, QGridLayout, QLabel, QLineEdit, 
+                            QTextEdit, QComboBox, QSpinBox, QPushButton, 
+                            QTableWidget, QTableWidgetItem, QTabWidget,
+                            QGroupBox, QFileDialog, QMessageBox, QTreeWidget,
+                            QTreeWidgetItem, QCheckBox, QScrollArea, QFrame,
+                            QProgressDialog, QRadioButton, QButtonGroup)
+from PyQt5.QtCore import Qt, QSize
+from PyQt5.QtGui import QFont, QIcon, QColor
+
+class ExcelTemplateManager:
+    """Handles Excel template reading and BRD data lookup"""
+    
+    def __init__(self):
+        self.template_data = None
+        self.brd_data = None
+        self.brd_file_path = None
+        
+    def load_template(self, file_path):
+        """Load task template from Excel"""
+        try:
+            # Read all sheets
+            excel_file = pd.ExcelFile(file_path)
+            self.template_data = {}
+            
+            for sheet_name in excel_file.sheet_names:
+                df = pd.read_excel(file_path, sheet_name=sheet_name)
+                self.template_data[sheet_name] = df
+                
+            return True, f"Loaded {len(excel_file.sheet_names)} sheets"
+        except Exception as e:
+            return False, f"Error loading template: {str(e)}"
+            
+    def load_brd_file(self, file_path):
+        """Load BRD performance data"""
+        try:
+            self.brd_file_path = file_path
+            excel_file = pd.ExcelFile(file_path)
+            self.brd_data = {}
+            
+            # Load all sheets (typically SBR and Mainline)
+            for sheet_name in excel_file.sheet_names:
+                df = pd.read_excel(file_path, sheet_name=sheet_name)
+                self.brd_data[sheet_name] = df
+                
+            return True, f"Loaded BRD data from {len(excel_file.sheet_names)} sheets"
+        except Exception as e:
+            return False, f"Error loading BRD: {str(e)}"
+            
+    def get_tasks_for_device(self, sheet_name, device_name):
+        """Get all applicable tasks for a specific device"""
+        if not self.template_data or sheet_name not in self.template_data:
+            return []
+            
+        df = self.template_data[sheet_name]
+        tasks = []
+        
+        # Look for 'Applicable' column or device-specific column
+        if 'Applicable' in df.columns:
+            # Filter rows where Applicable is True/Yes/X
+            applicable_df = df[df['Applicable'].notna()]
+            
+            for _, row in applicable_df.iterrows():
+                task = {
+                    'name': row.get('Task Name', row.get('Name', '')),
+                    'priority': row.get('Priority', 'P0'),
+                    'time': row.get('Time', row.get('Estimated Time', 15)),
+                    'device': device_name,
+                    'parent_task': row.get('Parent Task', ''),
+                    'notes': row.get('Notes', '')
+                }
+                tasks.append(task)
+        else:
+            # Try to find device column
+            device_columns = [col for col in df.columns if device_name.lower() in col.lower()]
+            if device_columns:
+                # Filter based on device column having value
+                for _, row in df.iterrows():
+                    if pd.notna(row.get(device_columns[0])):
+                        task = {
+                            'name': row.get('Task Name', row.get('Name', '')),
+                            'priority': row.get('Priority', 'P0'),
+                            'time': row.get('Time', row.get('Estimated Time', 15)),
+                            'device': device_name,
+                            'parent_task': row.get('Parent Task', ''),
+                            'notes': row.get('Notes', '')
+                        }
+                        tasks.append(task)
+                        
+        return tasks
+        
+    def lookup_brd_data(self, task_name, device_name, sheet_type='Mainline'):
+        """Lookup Previous Value and Perf_BRD from BRD file"""
+        if not self.brd_data:
+            return None, None
+            
+        # Try to find matching sheet
+        sheet_name = None
+        for name in self.brd_data.keys():
+            if sheet_type.lower() in name.lower():
+                sheet_name = name
+                break
+                
+        if not sheet_name:
+            # Use first sheet as fallback
+            sheet_name = list(self.brd_data.keys())[0]
+            
+        df = self.brd_data[sheet_name]
+        
+        # Try to find matching row
+        # Look for task name match (may need fuzzy matching)
+        for _, row in df.iterrows():
+            row_name = str(row.get('Name', row.get('Task Name', ''))).strip()
+            row_device = str(row.get('Device', row.get('Devices', ''))).strip()
+            
+            if task_name.lower() in row_name.lower() or row_name.lower() in task_name.lower():
+                if device_name.lower() in row_device.lower() or not row_device:
+                    previous_value = row.get('Previous Value', '')
+                    perf_brd = row.get('Perf_BRD', row.get('BRD', ''))
+                    return previous_value, perf_brd
+                    
+        return None, None
+        
+    def get_available_sheets(self):
+        """Get list of available template sheets"""
+        if self.template_data:
+            return list(self.template_data.keys())
+        return []
+
+class AsanaCSVGeneratorV2(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Asana CSV Generator V2 - Enhanced")
+        self.setGeometry(100, 100, 1400, 900)
+        
+        # Initialize Excel manager
+        self.excel_manager = ExcelTemplateManager()
+        
+        # Data storage
+        self.project_data = {
+            'name': '',
+            'sections': [],
+            'tasks': [],
+        }
+        
+        # Fixed CSV headers
+        self.csv_headers = [
+            "Task ID", "Created At", "Completed At", "Last Modified", "Name", 
+            "Section/Column", "Assignee", "Assignee Email", "Start Date", "Due Date", 
+            "Tags", "Notes", "Projects", "Parent task", "Blocked By (Dependencies)", 
+            "Blocking (Dependencies)", "Estimated time", "Actual time", "Priority", 
+            "Task Progress", "Iteration_01", "Iteration_02", "Iteration_03", 
+            "Iteration_04", "iteration_05", "Average", "Perf_BRD", 
+            "Deviation % Current Vs BRD", "GREEN", "YELLOW", "RED", "Devices", 
+            "Previous Value", "BRD Status", "Deviation % Current vs Previous", 
+            "Previous Status", "Tester Remark", "Logs Link", "Audited By", 
+            "Auditor N-points elapsed time (h:m)", "DA Value", "Auditor Pass", 
+            "iteration_06", "iteration_07", "iteration_08", "iteration_09", 
+            "iteration_10", "Iteration count", "Perf_BRD", "Previous Value", 
+            "me", "Projects (imported)", "Parent task"
+        ]
+        
+        # Fixed values
+        self.fixed_values = {
+            'GREEN': '0',
+            'YELLOW': '0.1',
+            'RED': '0.1',
+            'Iteration_01': '0',
+            'Average': '0',
+            'Perf_BRD': '0.1',
+            'Deviation % Current Vs BRD': '0.1'
+        }
+        
+        self.setup_ui()
+        self.auto_load_brd_file()
+        
+    def auto_load_brd_file(self):
+        """Auto-load BRD file if present in directory"""
+        current_dir = Path('.')
+        brd_files = list(current_dir.glob('*Performance*.xlsx')) + list(current_dir.glob('*BRD*.xlsx'))
+        
+        if brd_files:
+            success, message = self.excel_manager.load_brd_file(str(brd_files[0]))
+            if success:
+                self.brd_status_label.setText(f"✓ BRD Loaded: {brd_files[0].name}")
+                self.brd_status_label.setStyleSheet("QLabel { color: green; font-weight: bold; }")
+                
+    def setup_ui(self):
+        central_widget = QWidget()
+        self.setCentralWidget(central_widget)
+        
+        main_layout = QVBoxLayout(central_widget)
+        
+        # Header with file status
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(QLabel("<h2>Asana CSV Generator V2</h2>"))
+        header_layout.addStretch()
+        
+        self.template_status_label = QLabel("No template loaded")
+        self.brd_status_label = QLabel("No BRD loaded")
+        header_layout.addWidget(self.template_status_label)
+        header_layout.addWidget(QLabel("|"))
+        header_layout.addWidget(self.brd_status_label)
+        
+        main_layout.addLayout(header_layout)
+        
+        # Tab widget
+        tab_widget = QTabWidget()
+        main_layout.addWidget(tab_widget)
+        
+        # Create tabs
+        self.create_quick_import_tab(tab_widget)
+        self.create_project_tab(tab_widget)
+        self.create_sections_tab(tab_widget)
+        self.create_manual_tasks_tab(tab_widget)
+        self.create_preview_tab(tab_widget)
+        
+        # Action buttons
+        button_layout = QHBoxLayout()
+        
+        load_template_btn = QPushButton("📁 Load Excel Template")
+        load_template_btn.clicked.connect(self.load_excel_template)
+        load_template_btn.setStyleSheet("QPushButton { background-color: #9C27B0; color: white; font-weight: bold; padding: 8px; }")
+        
+        load_brd_btn = QPushButton("📊 Load BRD File")
+        load_brd_btn.clicked.connect(self.load_brd_file)
+        load_brd_btn.setStyleSheet("QPushButton { background-color: #FF5722; color: white; font-weight: bold; padding: 8px; }")
+        
+        generate_btn = QPushButton("✓ Generate CSV")
+        generate_btn.clicked.connect(self.generate_csv)
+        generate_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px; font-size: 14px; }")
+        
+        clear_btn = QPushButton("Clear All")
+        clear_btn.clicked.connect(self.clear_all_data)
+        
+        button_layout.addWidget(load_template_btn)
+        button_layout.addWidget(load_brd_btn)
+        button_layout.addStretch()
+        button_layout.addWidget(clear_btn)
+        button_layout.addWidget(generate_btn)
+        
+        main_layout.addLayout(button_layout)
+        
+    def create_quick_import_tab(self, tab_widget):
+        """Quick import tab for bulk task loading"""
+        quick_tab = QWidget()
+        tab_widget.addTab(quick_tab, "⚡ Quick Import")
+        
+        layout = QVBoxLayout(quick_tab)
+        
+        # Instructions
+        inst_group = QGroupBox("📖 Quick Import Instructions")
+        inst_layout = QVBoxLayout(inst_group)
+        instructions = QLabel(
+            "1. Load your Excel template with tasks (File → Load Excel Template)\n"
+            "2. Select target section and device\n"
+            "3. Choose which tasks to import (filtered by 'Applicable' column)\n"
+            "4. Click Import - BRD data will be automatically matched"
+        )
+        instructions.setWordWrap(True)
+        inst_layout.addWidget(instructions)
+        layout.addWidget(inst_group)
+        
+        # Import settings
+        settings_group = QGroupBox("Import Settings")
+        settings_layout = QGridLayout(settings_group)
+        
+        settings_layout.addWidget(QLabel("Excel Sheet:"), 0, 0)
+        self.import_sheet_combo = QComboBox()
+        self.import_sheet_combo.currentTextChanged.connect(self.on_sheet_changed)
+        settings_layout.addWidget(self.import_sheet_combo, 0, 1)
+        
+        settings_layout.addWidget(QLabel("Target Section:"), 1, 0)
+        self.import_section_combo = QComboBox()
+        settings_layout.addWidget(self.import_section_combo, 1, 1)
+        
+        settings_layout.addWidget(QLabel("Device:"), 2, 0)
+        self.import_device_combo = QComboBox()
+        self.import_device_combo.addItems(["Malbec", "Cava", "Barolo", "Rossini", 
+                                          "Sangria", "Pisco", "Seabreeze", "Gibson", 
+                                          "Paloma", "Calvados"])
+        self.import_device_combo.currentTextChanged.connect(self.on_device_changed)
+        settings_layout.addWidget(self.import_device_combo, 2, 1)
+        
+        # BRD sheet type selection
+        settings_layout.addWidget(QLabel("BRD Sheet Type:"), 3, 0)
+        brd_layout = QHBoxLayout()
+        self.brd_type_group = QButtonGroup()
+        self.brd_mainline_radio = QRadioButton("Mainline")
+        self.brd_sbr_radio = QRadioButton("SBR")
+        self.brd_mainline_radio.setChecked(True)
+        self.brd_type_group.addButton(self.brd_mainline_radio)
+        self.brd_type_group.addButton(self.brd_sbr_radio)
+        brd_layout.addWidget(self.brd_mainline_radio)
+        brd_layout.addWidget(self.brd_sbr_radio)
+        brd_layout.addStretch()
+        settings_layout.addLayout(brd_layout, 3, 1)
+        
+        preview_btn = QPushButton("Preview Tasks")
+        preview_btn.clicked.connect(self.preview_import_tasks)
+        settings_layout.addWidget(preview_btn, 4, 0, 1, 2)
+        
+        layout.addWidget(settings_group)
+        
+        # Preview table
+        preview_group = QGroupBox("Task Preview (Select tasks to import)")
+        preview_layout = QVBoxLayout(preview_group)
+        
+        self.import_preview_table = QTableWidget()
+        self.import_preview_table.setColumnCount(6)
+        self.import_preview_table.setHorizontalHeaderLabels(
+            ["☑", "Task Name", "Priority", "Time", "Parent Task", "Notes"])
+        preview_layout.addWidget(self.import_preview_table)
+        
+        import_controls = QHBoxLayout()
+        select_all_btn = QPushButton("Select All")
+        select_all_btn.clicked.connect(self.select_all_import_tasks)
+        deselect_all_btn = QPushButton("Deselect All")
+        deselect_all_btn.clicked.connect(self.deselect_all_import_tasks)
+        
+        import_selected_btn = QPushButton("Import Selected Tasks")
+        import_selected_btn.clicked.connect(self.import_selected_tasks)
+        import_selected_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; }")
+        
+        import_controls.addWidget(select_all_btn)
+        import_controls.addWidget(deselect_all_btn)
+        import_controls.addStretch()
+        import_controls.addWidget(import_selected_btn)
+        
+        preview_layout.addLayout(import_controls)
+        layout.addWidget(preview_group)
+        
+    def create_project_tab(self, tab_widget):
+        project_tab = QWidget()
+        tab_widget.addTab(project_tab, "Project Settings")
+        
+        layout = QVBoxLayout(project_tab)
+        
+        project_group = QGroupBox("Project Information")
+        project_layout = QGridLayout(project_group)
+        
+        project_layout.addWidget(QLabel("Project Name:"), 0, 0)
+        self.project_name_edit = QLineEdit()
+        self.project_name_edit.setPlaceholderText("e.g., J19.2 SBR J19.3 Mainline")
+        project_layout.addWidget(self.project_name_edit, 0, 1)
+        
+        layout.addWidget(project_group)
+        layout.addStretch()
+        
+    def create_sections_tab(self, tab_widget):
+        sections_tab = QWidget()
+        tab_widget.addTab(sections_tab, "Sections")
+        
+        layout = QVBoxLayout(sections_tab)
+        
+        add_section_group = QGroupBox("Add New Section")
+        add_layout = QGridLayout(add_section_group)
+        
+        add_layout.addWidget(QLabel("Section Name:"), 0, 0)
+        self.section_name_edit = QLineEdit()
+        self.section_name_edit.setPlaceholderText("e.g., Week_05 J19.2")
+        add_layout.addWidget(self.section_name_edit, 0, 1)
+        
+        add_section_btn = QPushButton("Add Section")
+        add_section_btn.clicked.connect(self.add_section)
+        add_layout.addWidget(add_section_btn, 0, 2)
+        
+        layout.addWidget(add_section_group)
+        
+        sections_group = QGroupBox("Project Sections")
+        sections_layout = QVBoxLayout(sections_group)
+        
+        self.sections_list = QTableWidget()
+        self.sections_list.setColumnCount(1)
+        self.sections_list.setHorizontalHeaderLabels(["Section Name"])
+        sections_layout.addWidget(self.sections_list)
+        
+        section_controls = QHBoxLayout()
+        delete_section_btn = QPushButton("Delete Selected")
+        delete_section_btn.clicked.connect(self.delete_section)
+        section_controls.addWidget(delete_section_btn)
+        section_controls.addStretch()
+        
+        sections_layout.addLayout(section_controls)
+        layout.addWidget(sections_group)
+        
+    def create_manual_tasks_tab(self, tab_widget):
+        tasks_tab = QWidget()
+        tab_widget.addTab(tasks_tab, "Manual Tasks")
+        
+        layout = QVBoxLayout(tasks_tab)
+        
+        # Task tree view
+        tasks_tree_group = QGroupBox("Project Structure")
+        tree_layout = QVBoxLayout(tasks_tree_group)
+        
+        self.tasks_tree = QTreeWidget()
+        self.tasks_tree.setHeaderLabels(["Task Name", "Priority", "Time", "Device"])
+        tree_layout.addWidget(self.tasks_tree)
+        
+        tree_controls = QHBoxLayout()
+        delete_task_btn = QPushButton("Delete Selected")
+        delete_task_btn.clicked.connect(self.delete_task)
+        tree_controls.addWidget(delete_task_btn)
+        tree_controls.addStretch()
+        
+        tree_layout.addLayout(tree_controls)
+        layout.addWidget(tasks_tree_group)
+        
+    def create_preview_tab(self, tab_widget):
+        preview_tab = QWidget()
+        tab_widget.addTab(preview_tab, "Preview & Export")
+        
+        layout = QVBoxLayout(preview_tab)
+        
+        preview_controls = QHBoxLayout()
+        refresh_btn = QPushButton("🔄 Refresh Preview")
+        refresh_btn.clicked.connect(self.refresh_preview)
+        
+        export_btn = QPushButton("💾 Export CSV")
+        export_btn.clicked.connect(self.export_csv)
+        export_btn.setStyleSheet("QPushButton { background-color: #FF9800; color: white; font-weight: bold; }")
+        
+        preview_controls.addWidget(refresh_btn)
+        preview_controls.addStretch()
+        preview_controls.addWidget(export_btn)
+        
+        layout.addLayout(preview_controls)
+        
+        self.preview_table = QTableWidget()
+        layout.addWidget(self.preview_table)
+        
+        self.stats_label = QLabel("Click 'Refresh Preview' to see CSV preview")
+        layout.addWidget(self.stats_label)
+        
+    def load_excel_template(self):
+        """Load Excel template file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Excel Template", "", 
+            "Excel files (*.xlsx *.xls)")
+            
+        if file_path:
+            success, message = self.excel_manager.load_template(file_path)
+            if success:
+                self.template_status_label.setText(f"✓ Template: {Path(file_path).name}")
+                self.template_status_label.setStyleSheet("QLabel { color: green; font-weight: bold; }")
+                
+                # Update sheet combo
+                sheets = self.excel_manager.get_available_sheets()
+                self.import_sheet_combo.clear()
+                self.import_sheet_combo.addItems(sheets)
+                
+                QMessageBox.information(self, "Success", message)
+            else:
+                QMessageBox.warning(self, "Error", message)
+                
+    def load_brd_file(self):
+        """Load BRD performance data file"""
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select BRD File", "", 
+            "Excel files (*.xlsx *.xls)")
+            
+        if file_path:
+            success, message = self.excel_manager.load_brd_file(file_path)
+            if success:
+                self.brd_status_label.setText(f"✓ BRD: {Path(file_path).name}")
+                self.brd_status_label.setStyleSheet("QLabel { color: green; font-weight: bold; }")
+                QMessageBox.information(self, "Success", message)
+            else:
+                QMessageBox.warning(self, "Error", message)
+                
+    def on_sheet_changed(self):
+        """Handle sheet selection change"""
+        pass
+        
+    def on_device_changed(self):
+        """Handle device selection change"""
+        pass
+        
+    def preview_import_tasks(self):
+        """Preview tasks from template for selected device"""
+        if not self.excel_manager.template_data:
+            QMessageBox.warning(self, "Warning", "Please load an Excel template first")
+            return
+            
+        sheet_name = self.import_sheet_combo.currentText()
+        device_name = self.import_device_combo.currentText()
+        
+        if not sheet_name:
+            QMessageBox.warning(self, "Warning", "Please select a sheet")
+            return
+            
+        tasks = self.excel_manager.get_tasks_for_device(sheet_name, device_name)
+        
+        # Populate preview table
+        self.import_preview_table.setRowCount(len(tasks))
+        
+        for row, task in enumerate(tasks):
+            # Checkbox
+            checkbox = QCheckBox()
+            checkbox.setChecked(True)
+            self.import_preview_table.setCellWidget(row, 0, checkbox)
+            
+            # Task details
+            self.import_preview_table.setItem(row, 1, QTableWidgetItem(str(task['name'])))
+            self.import_preview_table.setItem(row, 2, QTableWidgetItem(str(task['priority'])))
+            self.import_preview_table.setItem(row, 3, QTableWidgetItem(str(task['time'])))
+            self.import_preview_table.setItem(row, 4, QTableWidgetItem(str(task.get('parent_task', ''))))
+            self.import_preview_table.setItem(row, 5, QTableWidgetItem(str(task.get('notes', ''))))
+            
+        self.import_preview_table.resizeColumnsToContents()
+        QMessageBox.information(self, "Preview", f"Found {len(tasks)} applicable tasks for {device_name}")
+        
+    def select_all_import_tasks(self):
+        """Select all tasks in import preview"""
+        for row in range(self.import_preview_table.rowCount()):
+            checkbox = self.import_preview_table.cellWidget(row, 0)
+            if checkbox:
+                checkbox.setChecked(True)
+                
+    def deselect_all_import_tasks(self):
+        """Deselect all tasks in import preview"""
+        for row in range(self.import_preview_table.rowCount()):
+            checkbox = self.import_preview_table.cellWidget(row, 0)
+            if checkbox:
+                checkbox.setChecked(False)
+                
+    def import_selected_tasks(self):
+        """Import selected tasks from preview"""
+        section = self.import_section_combo.currentText()
+        device = self.import_device_combo.currentText()
+        brd_type = "Mainline" if self.brd_mainline_radio.isChecked() else "SBR"
+        
+        if not section:
+            QMessageBox.warning(self, "Warning", "Please select a target section first")
+            return
+            
+        imported_count = 0
+        
+        for row in range(self.import_preview_table.rowCount()):
+            checkbox = self.import_preview_table.cellWidget(row, 0)
+            if checkbox and checkbox.isChecked():
+                task_name = self.import_preview_table.item(row, 1).text()
+                priority = self.import_preview_table.item(row, 2).text()
+                time_val = self.import_preview_table.item(row, 3).text()
+                parent_task = self.import_preview_table.item(row, 4).text() if self.import_preview_table.item(row, 4) else ""
+                
+                # Convert time to HH:MM format
+                try:
+                    time_minutes = int(float(time_val))
+                    time_str = f"{time_minutes//60}:{time_minutes%60:02d}"
+                except:
+                    time_str = "0:15"
+                    
+                # Lookup BRD data
+                previous_value, perf_brd = self.excel_manager.lookup_brd_data(
+                    task_name, device, brd_type)
+                    
+                task_data = {
+                    'section': section,
+                    'parent_task': parent_task,
+                    'name': task_name,
+                    'priority': priority,
+                    'estimated_time': time_str,
+                    'device': device,
+                    'project': self.project_name_edit.text().strip(),
+                    'previous_value': previous_value if previous_value else '',
+                    'perf_brd': perf_brd if perf_brd else self.fixed_values['Perf_BRD']
+                }
+                
+                self.project_data['tasks'].append(task_data)
+                
+                # Add to tree view
+                item = QTreeWidgetItem([task_name, priority, time_str, device])
+                
+                if parent_task:
+                    # Find or create parent
+                    parent_item = self.find_or_create_parent(parent_task)
+                    parent_item.addChild(item)
+                else:
+                    self.tasks_tree.addTopLevelItem(item)
+                    
+                imported_count += 1
+                
+        self.tasks_tree.expandAll()
+        QMessageBox.information(self, "Success", f"Imported {imported_count} tasks")
+        
+    def find_or_create_parent(self, parent_name):
+        """Find or create parent task in tree"""
+        root = self.tasks_tree.invisibleRootItem()
+        for i in range(root.childCount()):
+            child = root.child(i)
+            if child.text(0) == parent_name:
+                return child
+                
+        # Create new parent
+        parent_item = QTreeWidgetItem([parent_name, "", "", ""])
+        self.tasks_tree.addTopLevelItem(parent_item)
+        return parent_item
+        
+    def add_section(self):
+        """Add a new section"""
+        section_name = self.section_name_edit.text().strip()
+        if not section_name:
+            QMessageBox.warning(self, "Warning", "Please enter a section name")
+            return
+            
+        self.project_data['sections'].append(section_name)
+        
+        row = self.sections_list.rowCount()
+        self.sections_list.insertRow(row)
+        self.sections_list.setItem(row, 0, QTableWidgetItem(section_name))
+        
+        self.import_section_combo.addItem(section_name)
+        self.section_name_edit.clear()
+        
+    def delete_section(self):
+        """Delete selected section"""
+        current_row = self.sections_list.currentRow()
+        if current_row >= 0:
+            section_name = self.sections_list.item(current_row, 0).text()
+            reply = QMessageBox.question(self, "Confirm", 
+                                        f"Delete section '{section_name}'?")
+            if reply == QMessageBox.Yes:
+                self.sections_list.removeRow(current_row)
+                if section_name in self.project_data['sections']:
+                    self.project_data['sections'].remove(section_name)
+                    
+    def delete_task(self):
+        """Delete selected task"""
+        current = self.tasks_tree.currentItem()
+        if current:
+            task_name = current.text(0)
+            reply = QMessageBox.question(self, "Confirm", 
+                                        f"Delete task '{task_name}'?")
+            if reply == QMessageBox.Yes:
+                parent = current.parent()
+                if parent:
+                    parent.removeChild(current)
+                else:
+                    root = self.tasks_tree.invisibleRootItem()
+                    root.removeChild(current)
+                    
+    def refresh_preview(self):
+        """Generate preview of CSV data"""
+        csv_data = self.generate_csv_data()
+        
+        # Update table
+        self.preview_table.setRowCount(len(csv_data))
+        self.preview_table.setColumnCount(len(self.csv_headers))
+        self.preview_table.setHorizontalHeaderLabels(self.csv_headers)
+        
+        for row, row_data in enumerate(csv_data):
+            for col, value in enumerate(row_data):
+                item = QTableWidgetItem(str(value))
+                self.preview_table.setItem(row, col, item)
+                
+        # Update stats
+        total_rows = len(csv_data)
+        sections_count = len(self.project_data['sections'])
+        tasks_count = len(self.project_data['tasks'])
+        
+        self.stats_label.setText(f"Total Rows: {total_rows} | Sections: {sections_count} | Tasks: {tasks_count}")
+        
+    def generate_csv_data(self):
+        """Generate the actual CSV data structure"""
+        rows = []
+        project_name = self.project_name_edit.text().strip()
+        
+        for section in self.project_data['sections']:
+            for task in self.project_data['tasks']:
+                if task['section'] == section:
+                    row = [""] * len(self.csv_headers)  # Initialize empty row
+                    
+                    # Fill known columns
+                    row[4] = task['name']  # Name
+                    row[5] = section if not task['parent_task'] else ""  # Section/Column
+                    row[12] = project_name  # Projects
+                    row[13] = task['parent_task']  # Parent task
+                    row[16] = task['estimated_time']  # Estimated time
+                    row[18] = task['priority']  # Priority
+                    
+                    # Add device info
+                    if task['device']:
+                        row[31] = task['device']  # Devices
+                        
+                    # Add fixed values
+                    row[20] = self.fixed_values['Iteration_01']  # Iteration_01
+                    row[25] = self.fixed_values['Average']  # Average
+                    row[26] = task.get('perf_brd', self.fixed_values['Perf_BRD'])  # Perf_BRD
+                    row[27] = self.fixed_values['Deviation % Current Vs BRD']  # Deviation
+                    row[28] = self.fixed_values['GREEN']  # GREEN
+                    row[29] = self.fixed_values['YELLOW']  # YELLOW
+                    row[30] = self.fixed_values['RED']  # RED
+                    
+                    # Add BRD data if available
+                    if task.get('previous_value'):
+                        row[32] = task['previous_value']  # Previous Value
+                        
+                    rows.append(row)
+                    
+        return rows
+        
+    def generate_csv(self):
+        """Main CSV generation function"""
+        if not self.project_data['sections'] or not self.project_data['tasks']:
+            QMessageBox.warning(self, "Warning", "Please add at least one section and one task")
+            return
+            
+        self.export_csv()
+        
+    def export_csv(self):
+        """Export CSV to file"""
+        filename, _ = QFileDialog.getSaveFileName(
+            self, "Save CSV File", 
+            f"asana_import_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+            "CSV files (*.csv)")
+            
+        if filename:
+            try:
+                csv_data = self.generate_csv_data()
+                
+                with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
+                    writer = csv.writer(csvfile)
+                    writer.writerow(self.csv_headers)  # Write headers
+                    writer.writerows(csv_data)  # Write data
+                    
+                QMessageBox.information(self, "Success", 
+                                      f"CSV file exported successfully!\n{filename}\n\nTotal rows: {len(csv_data)}")
+                                      
+            except Exception as e:
+                QMessageBox.critical(self, "Error", f"Failed to export CSV:\n{str(e)}")
+                
+    def clear_all_data(self):
+        """Clear all data"""
+        reply = QMessageBox.question(self, "Confirm Clear", 
+                                   "Clear all data? This cannot be undone.")
+        if reply == QMessageBox.Yes:
+            self.project_data = {'name': '', 'sections': [], 'tasks': []}
+            self.project_name_edit.clear()
+            self.sections_list.setRowCount(0)
+            self.tasks_tree.clear()
+            self.import_section_combo.clear()
+            self.preview_table.setRowCount(0)
+            self.import_preview_table.setRowCount(0)
+
+def main():
+    app = QApplication(sys.argv)
+    
+    # Set application style
+    app.setStyle('Fusion')
+    
+    # Check for pandas
+    try:
+        import pandas
+    except ImportError:
+        QMessageBox.critical(None, "Missing Dependency", 
+                           "Please install pandas:\n\npip install pandas openpyxl")
+        sys.exit(1)
+    
+    window = AsanaCSVGeneratorV2()
+    window.show()
+    
+    sys.exit(app.exec_())
+
+if __name__ == '__main__':
+    main()

@@ -43,41 +43,21 @@ class ExcelTemplateManager:
         self.brd_file_path = None
         
     def load_template(self, file_path):
-        """Load task template from Excel or CSV"""
+        """Load task template from Excel"""
         try:
             logging.info(f"Loading template from: {file_path}")
             
-            # Detect file type
-            file_ext = Path(file_path).suffix.lower()
+            # Read all sheets at once (more efficient)
+            self.template_data = pd.read_excel(file_path, sheet_name=None)
             
-            if file_ext == '.csv':
-                # Load CSV file
-                logging.info("Detected CSV file format")
-                df = pd.read_csv(file_path)
-                # For CSV, create a single sheet dictionary
-                sheet_name = Path(file_path).stem  # Use filename as sheet name
-                self.template_data = {sheet_name: df}
-                logging.info(f"Successfully loaded CSV with {len(df)} rows")
-                return True, f"Loaded CSV file with {len(df)} rows"
-            elif file_ext in ['.xlsx', '.xls']:
-                # Load Excel file - read all sheets at once (more efficient)
-                logging.info("Detected Excel file format")
-                self.template_data = pd.read_excel(file_path, sheet_name=None)
-                logging.info(f"Successfully loaded {len(self.template_data)} sheets")
-                return True, f"Loaded {len(self.template_data)} sheets"
-            else:
-                logging.error(f"Unsupported file format: {file_ext}")
-                return False, f"Unsupported file format: {file_ext}. Please use .csv, .xlsx, or .xls files."
-                
+            logging.info(f"Successfully loaded {len(self.template_data)} sheets")
+            return True, f"Loaded {len(self.template_data)} sheets"
         except FileNotFoundError:
             logging.error(f"Template file not found: {file_path}")
             return False, "Template file not found"
         except pd.errors.EmptyDataError:
             logging.error(f"Template file is empty: {file_path}")
             return False, "Template file is empty"
-        except pd.errors.ParserError as e:
-            logging.error(f"CSV parsing error: {e}")
-            return False, f"CSV parsing error: {str(e)}"
         except Exception as e:
             logging.exception(f"Unexpected error loading template: {file_path}")
             return False, f"Error loading template: {str(e)}"
@@ -507,8 +487,8 @@ class AsanaCSVGeneratorV2(QMainWindow):
     def load_excel_template(self):
         """Load Excel template file"""
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Template File", "", 
-            "Template files (*.csv *.xlsx *.xls);;CSV files (*.csv);;Excel files (*.xlsx *.xls);;All files (*.*)")
+            self, "Select Excel Template", "", 
+            "Excel files (*.xlsx *.xls)")
             
         if file_path:
             success, message = self.excel_manager.load_template(file_path)

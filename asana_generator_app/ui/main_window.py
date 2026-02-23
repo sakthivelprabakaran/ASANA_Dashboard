@@ -912,7 +912,11 @@ class MainWindow(QMainWindow):
             Dict with {applicable, perf_value, prev_value}
         """
         if not brd_data or len(brd_data) < 2:
+            logger.info(f"[MATCH] No BRD data for scenario='{scenario}' (brd_data len={len(brd_data) if brd_data else 0})")
             return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        
+        logger.info(f"[MATCH] scenario='{scenario}', device='{device}', perf_idx={perf_idx}, prev_idx={prev_idx}, "
+                    f"brd_rows={len(brd_data)}, template_sheet='{template_sheet}'")
         
         # Strategy 1: OOBE matching
         if self._is_oobe_sheet(template_df, template_sheet):

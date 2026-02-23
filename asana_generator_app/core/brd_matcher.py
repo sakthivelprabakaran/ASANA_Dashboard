@@ -5,6 +5,9 @@ Device filtering is done by Template's 'Applicable Devices' column, NOT by BRD.
 
 from typing import Dict, Any, List, Optional, Tuple
 import re
+import logging
+
+logger = logging.getLogger('AsanaGenerator.BrdMatcher')
 
 class BrdMatcher:
     """
@@ -162,20 +165,45 @@ class BrdMatcher:
                     ('performance' in h_str and 'sc' in h_str) or # Very loose fallback
                     h_str == 'name')
         
-        # Helper to find column in any of the scan rows
-        def find_col_in_scan_rows(predicate):
+        # Helper to find ALL matching columns in scan rows
+        def find_all_cols_in_scan_rows(predicate):
+            found = set()
             for r_idx, row in enumerate(scan_rows):
                 for c_idx, val in enumerate(row):
                     if predicate(val):
-                        return c_idx
-            return -1
+                        found.add(c_idx)
+            return sorted(found)
+
+        # Helper to find the column closest to (and before) a reference column
+        def find_nearest_col(candidates, ref_col):
+            if not candidates:
+                return -1
+            if ref_col == -1:
+                return candidates[0]  # No reference, use first found
+            
+            # Prefer columns BEFORE the perf/prev columns (scenario usually comes first)
+            before = [c for c in candidates if c < ref_col]
+            if before:
+                return before[-1]  # Closest one before reference
+            return candidates[0]  # Fallback to first found
+
+        # Reference column = min of perf/prev (the selected value columns)
+        ref_col = -1
+        if perf_col_index != -1 and prev_col_index != -1:
+            ref_col = min(perf_col_index, prev_col_index)
+        elif perf_col_index != -1:
+            ref_col = perf_col_index
+        elif prev_col_index != -1:
+            ref_col = prev_col_index
 
         # First try to find "Performance Scenario" specifically
-        scenario_col_idx = find_col_in_scan_rows(is_performance_scenario_col)
+        perf_scenario_cols = find_all_cols_in_scan_rows(is_performance_scenario_col)
+        scenario_col_idx = find_nearest_col(perf_scenario_cols, ref_col)
         
         # If not found, fall back to any scenario-like column
         if scenario_col_idx == -1:
-            scenario_col_idx = find_col_in_scan_rows(is_any_scenario_col)
+            any_scenario_cols = find_all_cols_in_scan_rows(is_any_scenario_col)
+            scenario_col_idx = find_nearest_col(any_scenario_cols, ref_col)
 
         # If we can't find scenario column, return applicable with no values
         if scenario_col_idx == -1:
@@ -184,8 +212,16 @@ class BrdMatcher:
         # Normalize the input scenario name
         normalized_scenario = self.normalize_scenario_name(scenario_name)
         
+        # Log row width for diagnostic
+        max_cols = max(len(row) for row in brd_data) if brd_data else 0
+        logger.info(f"Standard match: scenario='{scenario_name}' -> normalized='{normalized_scenario}', "
+                     f"scenario_col={scenario_col_idx}, perf_col={perf_col_index}, prev_col={prev_col_index}, "
+                     f"brd_max_cols={max_cols}, brd_rows={len(brd_data)}")
+        
         # Search through data rows (start from row 2 to skip headers)
         start_row = 2
+        match_count = 0
+        logged_samples = 0
 
         for row_idx, row in enumerate(brd_data[start_row:], start=start_row):
             if not row or len(row) == 0:
@@ -195,20 +231,36 @@ class BrdMatcher:
             row_scenario_raw = row[scenario_col_idx] if scenario_col_idx < len(row) else ''
             row_scenario = self.normalize_scenario_name(row_scenario_raw)
             
+            # Log first few BRD scenario names for debugging
+            if logged_samples < 3 and row_scenario:
+                logger.info(f"  BRD row {row_idx} scenario: '{row_scenario}' (cols={len(row)})")
+                logged_samples += 1
+            
             # Check for match
             if row_scenario != normalized_scenario:
                 continue
 
+            match_count += 1
+            logger.info(f"  ✓ MATCH at row {row_idx}: row_len={len(row)}, "
+                       f"perf_col={perf_col_index} (in_range={perf_col_index < len(row)}), "
+                       f"prev_col={prev_col_index} (in_range={prev_col_index < len(row)})")
+            
             # Found a match! Extract and sanitize values (NO device filtering here)
             perf_value = '-'
             if perf_col_index != -1 and perf_col_index < len(row):
                 val = row[perf_col_index]
                 perf_value = self.sanitize_numeric_value(val)
+                logger.info(f"    perf raw='{val}' -> '{perf_value}'")
+            else:
+                logger.info(f"    perf col {perf_col_index} OUT OF RANGE (row has {len(row)} cols)")
 
             prev_value = '-'
             if prev_col_index != -1 and prev_col_index < len(row):
                 val = row[prev_col_index]
                 prev_value = self.sanitize_numeric_value(val)
+                logger.info(f"    prev raw='{val}' -> '{prev_value}'")
+            else:
+                logger.info(f"    prev col {prev_col_index} OUT OF RANGE (row has {len(row)} cols)")
 
             return {
                 'applicable': True,
@@ -217,6 +269,7 @@ class BrdMatcher:
             }
 
         # No match found in BRD - task is still applicable, just no BRD values
+        logger.info(f"  ✗ NO MATCH found for '{normalized_scenario}' in {len(brd_data)-start_row} data rows")
         return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
 
     def get_brd_data_for_oobe_task(self, scenario_name: str, device: str,
@@ -421,11 +474,12 @@ class BrdMatcher:
         feature_col_idx = self.find_new_feature_column(brd_data)
         if feature_col_idx == -1:
             # No New Feature column - fall back to standard matching
+            logger.info(f"New Feature match: no 'New Feature' column found, falling back to standard match")
             return self.get_brd_data_for_task(
                 scenario_name, device, brd_data, perf_col_index, prev_col_index, debug
             )
         
-        # Find scenario column
+        # Find scenario column - use nearest-to-perf/prev logic (same as standard match)
         scan_rows = brd_data[:10]
         
         def is_performance_scenario_col(h):
@@ -442,26 +496,56 @@ class BrdMatcher:
                     ('performance' in h_str and 'sc' in h_str) or
                     h_str == 'name')
         
-        def find_col_in_scan_rows(predicate):
+        def find_all_cols_in_scan_rows(predicate):
+            found = set()
             for r_idx, row in enumerate(scan_rows):
                 for c_idx, val in enumerate(row):
                     if predicate(val):
-                        return c_idx
-            return -1
+                        found.add(c_idx)
+            return sorted(found)
+
+        def find_nearest_col(candidates, ref_col):
+            if not candidates:
+                return -1
+            if ref_col == -1:
+                return candidates[0]
+            before = [c for c in candidates if c < ref_col]
+            if before:
+                return before[-1]
+            return candidates[0]
+
+        ref_col = -1
+        if perf_col_index != -1 and prev_col_index != -1:
+            ref_col = min(perf_col_index, prev_col_index)
+        elif perf_col_index != -1:
+            ref_col = perf_col_index
+        elif prev_col_index != -1:
+            ref_col = prev_col_index
+
+        perf_scenario_cols = find_all_cols_in_scan_rows(is_performance_scenario_col)
+        scenario_col_idx = find_nearest_col(perf_scenario_cols, ref_col)
         
-        scenario_col_idx = find_col_in_scan_rows(is_performance_scenario_col)
         if scenario_col_idx == -1:
-            scenario_col_idx = find_col_in_scan_rows(is_any_scenario_col)
+            any_scenario_cols = find_all_cols_in_scan_rows(is_any_scenario_col)
+            scenario_col_idx = find_nearest_col(any_scenario_cols, ref_col)
         
         if scenario_col_idx == -1:
+            logger.info(f"New Feature match: no scenario column found")
             return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
         
         # Normalize inputs
         normalized_scenario = self.normalize_scenario_name(scenario_name)
         normalized_feature = self.normalize_scenario_name(feature_category)
         
+        max_cols = max(len(row) for row in brd_data) if brd_data else 0
+        logger.info(f"New Feature match: scenario='{scenario_name}' -> '{normalized_scenario}', "
+                    f"feature='{feature_category}' -> '{normalized_feature}', "
+                    f"scenario_col={scenario_col_idx}, feature_col={feature_col_idx}, "
+                    f"perf_col={perf_col_index}, prev_col={prev_col_index}, brd_max_cols={max_cols}")
+        
         # Search through data rows
         start_row = 2
+        logged_samples = 0
         for row_idx, row in enumerate(brd_data[start_row:], start=start_row):
             if not row or len(row) == 0:
                 continue
@@ -470,24 +554,40 @@ class BrdMatcher:
             row_scenario_raw = row[scenario_col_idx] if scenario_col_idx < len(row) else ''
             row_scenario = self.normalize_scenario_name(row_scenario_raw)
             
+            # Log first few for debugging
+            if logged_samples < 3 and row_scenario:
+                row_feature_sample = row[feature_col_idx] if feature_col_idx < len(row) else ''
+                logger.info(f"  BRD row {row_idx}: scenario='{row_scenario}', feature='{row_feature_sample}'")
+                logged_samples += 1
+            
             if row_scenario != normalized_scenario:
                 continue
             
-            # MATCH 2: Feature category
+            # MATCH 2: Feature category (skip check if BRD feature cell is empty - likely merged cell)
             row_feature_raw = row[feature_col_idx] if feature_col_idx < len(row) else ''
             row_feature = self.normalize_scenario_name(row_feature_raw)
             
-            if normalized_feature and row_feature != normalized_feature:
+            logger.info(f"  Scenario match at row {row_idx}: brd_feature='{row_feature}' vs template_feature='{normalized_feature}'")
+            
+            # Only filter by feature if BOTH template feature AND BRD feature are non-empty
+            # Empty BRD feature = merged cell or section-based grouping, don't reject
+            if normalized_feature and row_feature and row_feature != normalized_feature:
                 continue
             
             # Match found! Extract values
             perf_value = '-'
             if perf_col_index != -1 and perf_col_index < len(row):
                 perf_value = self.sanitize_numeric_value(row[perf_col_index])
+                logger.info(f"    ✓ perf raw='{row[perf_col_index]}' -> '{perf_value}'")
+            else:
+                logger.info(f"    perf col {perf_col_index} OUT OF RANGE (row has {len(row)} cols)")
             
             prev_value = '-'
             if prev_col_index != -1 and prev_col_index < len(row):
                 prev_value = self.sanitize_numeric_value(row[prev_col_index])
+                logger.info(f"    ✓ prev raw='{row[prev_col_index]}' -> '{prev_value}'")
+            else:
+                logger.info(f"    prev col {prev_col_index} OUT OF RANGE (row has {len(row)} cols)")
             
             return {
                 'applicable': True,
@@ -495,8 +595,12 @@ class BrdMatcher:
                 'prev_value': prev_value
             }
         
-        # No match found
-        return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        # No match found with feature filter - fall back to standard matching (scenario only)
+        logger.info(f"  ✗ NO MATCH for new feature: '{normalized_scenario}' + '{normalized_feature}', "
+                    f"falling back to standard match")
+        return self.get_brd_data_for_task(
+            scenario_name, device, brd_data, perf_col_index, prev_col_index, debug
+        )
 
     def batch_match(self, tasks: List[Dict[str, Any]], device: str,
                     brd_data: List[List[Any]], 

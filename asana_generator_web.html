@@ -714,6 +714,16 @@
             color: white;
         }
 
+        .device-badge.prosecco {
+            background: #fbbf24;
+            color: black;
+        }
+
+        .device-badge.marsala {
+            background: #be123c;
+            color: white;
+        }
+
         /* Priority Badges */
         .priority-badge {
             padding: 3px 8px;
@@ -905,6 +915,8 @@
                             <option value="Gibson">Gibson</option>
                             <option value="Paloma">Paloma</option>
                             <option value="Calvados">Calvados</option>
+                            <option value="Prosecco">Prosecco</option>
+                            <option value="Marsala">Marsala</option>
                         </select>
                     </div>
 
@@ -1110,7 +1122,7 @@
         let selectionMode = 'perf'; // 'perf' or 'prev'
         let currentBrdSheet = null;
 
-        const DEVICES = ['Malbec', 'Cava', 'Barolo', 'Rossini', 'Sangria', 'Pisco', 'Seabreeze', 'Gibson', 'Paloma', 'Calvados', 'Eanab', 'Decanter'];
+        const DEVICES = ['Malbec', 'Cava', 'Barolo', 'Rossini', 'Sangria', 'Pisco', 'Seabreeze', 'Gibson', 'Paloma', 'Calvados', 'Eanab', 'Decanter', 'Prosecco', 'Marsala'];
 
         // File uploads
         document.getElementById('templateUpload').addEventListener('click', () => document.getElementById('templateFile').click());

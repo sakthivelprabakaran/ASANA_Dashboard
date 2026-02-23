@@ -1,6 +1,10 @@
+import logging
 import pandas as pd
 import openpyxl
 from typing import Dict, List, Optional, Tuple, Any
+
+logger = logging.getLogger('AsanaGenerator.DataLoader')
+
 
 class DataLoader:
     """
@@ -39,15 +43,20 @@ class DataLoader:
                     best_match_count = match_count
                     best_row_idx = idx
             
+            logger.info(f"Template '{file_path}': detected header at row {best_row_idx} "
+                       f"({best_match_count} column matches)")
+            
             # Reload with correct header
             df = pd.read_excel(file_path, sheet_name=sheet_name or 0, header=best_row_idx)
             
             # Clean empty rows/cols
             df = df.dropna(how='all', axis=0).dropna(how='all', axis=1)
             
+            logger.info(f"Template loaded: {len(df)} rows, {len(df.columns)} columns")
             return df
             
         except Exception as e:
+            logger.error(f"Failed to load Template file '{file_path}': {e}")
             raise Exception(f"Failed to load Template file: {str(e)}")
 
     @staticmethod
@@ -57,6 +66,7 @@ class DataLoader:
         Uses data_only=True to get calculated values from formula cells.
         Returns: List of rows, where each row is a list of cell values.
         """
+        wb = None
         try:
             # Use openpyxl with data_only=True to evaluate formulas
             wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
@@ -78,17 +88,26 @@ class DataLoader:
                         row_values.append(val)
                 raw_data.append(row_values)
             
-            wb.close()
+            logger.info(f"BRD raw loaded: {len(raw_data)} rows from '{file_path}'")
             return raw_data
             
         except Exception as e:
+            logger.error(f"Failed to load BRD file '{file_path}': {e}")
             raise Exception(f"Failed to load BRD file: {str(e)}")
+        finally:
+            if wb:
+                wb.close()
 
     @staticmethod
     def get_sheet_names(file_path: str) -> List[str]:
         """Returns list of sheet names in the Excel file."""
-        xls = pd.ExcelFile(file_path)
-        return xls.sheet_names
+        xls = None
+        try:
+            xls = pd.ExcelFile(file_path)
+            return xls.sheet_names
+        finally:
+            if xls:
+                xls.close()
 
     @staticmethod
     def load_all_sheets_as_raw(file_path: str) -> Dict[str, List[List[Any]]]:
@@ -97,6 +116,7 @@ class DataLoader:
         Uses data_only=True to get calculated values from formula cells.
         Returns: Dict mapping sheet name to list-of-lists data.
         """
+        wb = None
         try:
             # Use openpyxl with data_only=True to evaluate formulas
             wb = openpyxl.load_workbook(file_path, data_only=True, read_only=True)
@@ -119,11 +139,15 @@ class DataLoader:
                 
                 sheets_data[sheet_name] = sheet_data
             
-            wb.close()
+            logger.info(f"Loaded {len(sheets_data)} sheets from '{file_path}'")
             return sheets_data
             
         except Exception as e:
+            logger.error(f"Failed to load Excel file '{file_path}': {e}")
             raise Exception(f"Failed to load Excel file: {str(e)}")
+        finally:
+            if wb:
+                wb.close()
 
     @staticmethod
     def load_all_template_sheets(file_path: str) -> Dict[str, pd.DataFrame]:
@@ -140,10 +164,14 @@ class DataLoader:
                     df = DataLoader.load_template(file_path, sheet_name)
                     if not df.empty:
                         sheets_data[sheet_name] = df
-                except:
+                except Exception as e:
+                    logger.warning(f"Skipping sheet '{sheet_name}': {e}")
                     continue
             
+            xls.close()
+            logger.info(f"Template loaded: {len(sheets_data)} valid sheets from '{file_path}'")
             return sheets_data
             
         except Exception as e:
+            logger.error(f"Failed to load Template file '{file_path}': {e}")
             raise Exception(f"Failed to load Template file: {str(e)}")

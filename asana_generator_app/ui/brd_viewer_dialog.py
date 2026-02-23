@@ -8,6 +8,7 @@ A modal dialog matching the web app's spreadsheet viewer functionality:
 - Match count and navigation
 """
 
+import logging
 from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, 
                              QTableWidgetItem, QLineEdit, QPushButton, QLabel,
                              QWidget, QHeaderView, QAbstractItemView, QFrame,
@@ -15,6 +16,8 @@ from PyQt5.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget,
 from PyQt5.QtCore import Qt, QModelIndex
 from PyQt5.QtGui import QColor, QBrush, QFont, QPainter
 from typing import List, Any, Dict
+
+logger = logging.getLogger('AsanaGenerator.BrdViewer')
 
 
 class ColumnHighlightDelegate(QStyledItemDelegate):
@@ -26,12 +29,12 @@ class ColumnHighlightDelegate(QStyledItemDelegate):
         self.prev_col = -1
         self.match_cols = []
         
-        # Bright test colors
-        self.COLOR_PERF = QColor(0, 255, 0)      # Bright green
-        self.COLOR_PREV = QColor(255, 255, 0)    # Bright yellow  
-        self.COLOR_MATCH = QColor(0, 255, 255)   # Bright cyan
-        self.COLOR_EVEN = QColor(255, 255, 255)  # White
-        self.COLOR_ODD = QColor(248, 250, 252)   # Light gray
+        # Consistent colors matching the dialog's class-level definitions
+        self.COLOR_PERF = QColor(134, 239, 172)   # Light green (#86efac)
+        self.COLOR_PREV = QColor(253, 186, 116)   # Light orange (#fdba74)
+        self.COLOR_MATCH = QColor(147, 197, 253)   # Light blue (#93c5fd)
+        self.COLOR_EVEN = QColor(255, 255, 255)    # White
+        self.COLOR_ODD = QColor(248, 250, 252)     # Light gray
     
     def set_highlighting(self, perf_col: int, prev_col: int, match_cols: List[int]):
         """Update which columns should be highlighted."""
@@ -461,17 +464,13 @@ class BrdViewerDialog(QDialog):
         perf_idx = self.selected_perf_col.get("index", -1)
         prev_idx = self.selected_prev_col.get("index", -1)
         
-        # DEBUG
-        print(f"DEBUG: update_column_highlighting called")
-        print(f"DEBUG: perf_idx={perf_idx}, prev_idx={prev_idx}")
-        print(f"DEBUG: current_matches={self.current_matches}")
+        logger.debug(f"Column highlighting: perf={perf_idx}, prev={prev_idx}, matches={self.current_matches}")
         
         # Update the delegate with current highlighting state
         self.delegate.set_highlighting(perf_idx, prev_idx, self.current_matches)
         
         # Force table repaint to trigger delegate's paint() method
         self.table.viewport().update()
-        print(f"DEBUG: Delegate updated and table repaint triggered")
                         
     def search_columns(self, query: str):
         """Search columns by header text and first data row values."""

@@ -1,248 +1,150 @@
-# Asana CSV Generator V2
+# Asana CSV Generator v4.1
 
-Enhanced PyQt5 application for generating Asana-formatted CSV files with Excel template integration and BRD data lookup.
+A PyQt5 desktop application and standalone web interface for generating Asana-compatible CSV files from Excel templates with automatic BRD data integration.
 
 ## Features
 
-✨ **Quick Import from Excel Templates**
-- Load task templates from Excel files
-- Filter tasks by device using "Applicable" column
-- Bulk import with checkbox selection
+### Desktop Application (PyQt5)
+- 📄 **Excel Template Loading** — Auto-detects header rows, supports multi-sheet templates
+- 📊 **BRD Spreadsheet Viewer** — Visual column selection with search, quick filters, and highlighting
+- 🎯 **Intelligent BRD Matching** — Normalized scenario name matching with typo tolerance
+- 📱 **Device Filtering** — Filters tasks by Template's "Applicable Devices" column
+- 🔄 **OOBE Multi-Criteria Matching** — Enhanced matching for OOBE sheets (component + scenario)
+- 📋 **Configuration Queue** — Queue multiple device/sheet configs before export
+- 💾 **Queue Persistence** — Queue saved to disk, survives app restarts
+- 📝 **Comprehensive Logging** — All operations logged to file for debugging
 
-📊 **Automatic BRD Data Integration**
-- Auto-loads BRD performance files from directory
-- Matches tasks with Previous Value and Perf_BRD data
-- Supports both SBR and Mainline sheet types
+### Web Interface
+- 🌐 **Standalone HTML** — Single-file web app (`asana_generator_web.html`), no server required
+- 📊 **Same matching logic** — Mirrors desktop app's BRD matching and template processing
 
-🎯 **Fixed Performance Values**
-- GREEN: 0
-- YELLOW: 0.1
-- RED: 0.1
-- Iteration_01: 0
-- Average: 0
-- Perf_BRD: 0.1 (default)
-- Deviation % Current Vs BRD: 0.1
-
-🔧 **User-Friendly Interface**
-- Tab-based navigation
-- Visual task hierarchy tree
-- CSV preview before export
-- Section and task management
-
-## Installation
+## Quick Start
 
 ### Prerequisites
 ```bash
-# Install Python 3.7+
-# Install required packages
 pip install PyQt5 pandas openpyxl
 ```
 
-### Quick Start
+### Run the Desktop App
 ```bash
-# Run the application
-python asana_csv_generator_v2.py
+cd asana_generator_app
+python main.py
 ```
+
+### Run the Web Interface
+Open `asana_generator_web.html` in any modern browser — no installation needed.
 
 ## Usage Guide
 
-### 1. Project Setup
-1. Go to **Project Settings** tab
-2. Enter your project name (e.g., "J19.2 SBR J19.3 Mainline")
+### Step 1: Load Files
+1. **Template** auto-loads from `resources/Template.xlsx`, or click "Update..." to select a different file
+2. Click **"Select File..."** to load a BRD Excel file
+3. Select the appropriate **sheet** for both Template and BRD
 
-### 2. Create Sections
-1. Go to **Sections** tab
-2. Enter section name (e.g., "Week_05 J19.2")
-3. Click **Add Section**
-4. Repeat for all needed sections
+### Step 2: Configure
+1. Enter a **Parent Task Name** (e.g., "P1 Malbec - WiFi Stability")
+2. Select the **Target Device** (e.g., Malbec, Cava, Barolo)
+3. Enter **Project Name** and **Section** for Asana organization
+4. For OOBE sheets: select the **Dashboard Component**
 
-### 3. Quick Import from Excel (Recommended)
+### Step 3: Select BRD Columns
+1. Click **"🔍 Open Spreadsheet Viewer"**
+2. Search for your device name (e.g., "Malbec BRD")
+3. Click column headers to select **Perf/BRD** (green) and **Previous Value** (orange) columns
+4. Confirm selection
 
-#### Step 1: Prepare Your Excel Template
-Your Excel template should have these columns:
-- **Applicable** - Mark with any value (X, Yes, True) for tasks to include
-- **Task Name** or **Name** - The task description
-- **Priority** - P0, P1, P2, P3, OOBE, GEN Ai, etc.
-- **Time** or **Estimated Time** - Time in minutes
-- **Parent Task** - (Optional) Parent task name for subtasks
-- **Notes** - (Optional) Additional notes
+### Step 4: Build Queue & Export
+1. Click **"➕ Add to Queue"** — repeat for multiple devices/configs
+2. Click **"👁️ Preview Tasks"** to verify
+3. Click **"💾 Export CSV"** to generate the Asana-compatible file
+4. Import the CSV into Asana via Project → ⋯ → Import → CSV
 
-Example Excel structure:
+## Project Structure
+
 ```
-| Applicable | Task Name                    | Priority | Time | Parent Task      |
-|------------|------------------------------|----------|------|------------------|
-| X          | P0 All Devices              | P0       | 0    |                  |
-| X          | Wake-up time from suspend   | P0       | 15   | P0 All Devices   |
+ASANA_Dashboard/
+├── asana_generator_app/           # Desktop application
+│   ├── main.py                    # Entry point with logging setup
+│   ├── requirements.txt           # Python dependencies
+│   ├── core/
+│   │   ├── brd_matcher.py         # BRD matching engine
+│   │   └── data_loader.py         # Excel/CSV file loading
+│   ├── ui/
+│   │   ├── main_window.py         # Main application window
+│   │   ├── brd_viewer_dialog.py   # BRD spreadsheet viewer dialog
+│   │   └── styles.qss             # Qt stylesheet (light theme)
+│   └── resources/
+│       └── Template.xlsx          # Default template (auto-loaded)
+├── asana_generator_web.html       # Standalone web interface
+├── .gitignore
+└── README.md
 ```
-
-#### Step 2: Load Files
-1. Click **📁 Load Excel Template** button
-2. Select your task template Excel file
-3. BRD file auto-loads if named with "Performance" or "BRD" in filename
-   - Or manually click **📊 Load BRD File** to select
-
-#### Step 3: Import Tasks
-1. Go to **⚡ Quick Import** tab
-2. Select:
-   - **Excel Sheet**: Choose the sheet containing tasks
-   - **Target Section**: Select where to import (must create sections first)
-   - **Device**: Select device name (Malbec, Cava, Barolo, etc.)
-   - **BRD Sheet Type**: Choose Mainline or SBR
-3. Click **Preview Tasks** to see filtered tasks
-4. Check/uncheck tasks to import
-5. Click **Import Selected Tasks**
-
-The app will:
-- Filter tasks based on "Applicable" column
-- Apply device name to all tasks
-- Lookup BRD data automatically (Previous Value, Perf_BRD)
-- Set fixed values (GREEN, YELLOW, RED)
-- Add to project structure
-
-### 4. Review and Export
-1. Go to **Manual Tasks** tab to see imported hierarchy
-2. Go to **Preview & Export** tab
-3. Click **🔄 Refresh Preview** to see CSV preview
-4. Review the data
-5. Click **💾 Export CSV** to save file
-
-### 5. Import to Asana
-1. Open Asana project
-2. Click on the three dots (...) menu
-3. Select "Import" → "CSV"
-4. Upload the generated CSV file
-5. Asana will create sections, tasks, and subtasks based on the hierarchy
-
-## Excel Template Format
-
-### Required Columns for Task Import
-- `Applicable` - Any value marks task as applicable
-- `Task Name` or `Name` - Task description
-- `Priority` - Task priority level
-- `Time` or `Estimated Time` - Duration in minutes
-
-### Optional Columns
-- `Parent Task` - For creating subtasks
-- `Notes` - Additional information
-- `Section` - Section assignment
-
-### BRD File Format
-The BRD file should contain:
-- `Name` or `Task Name` - For matching with templates
-- `Device` or `Devices` - Device identifier
-- `Previous Value` - Historical performance value
-- `Perf_BRD` or `BRD` - BRD performance baseline
-
-## File Naming Conventions
-
-### Auto-Detection
-- **BRD Files**: Must contain "Performance" or "BRD" in filename
-  - Example: `Juno_Mainline_Performance_Results_Mar_J19.3 (6).xlsx`
-  
-### Export Format
-- Generated CSV: `asana_import_YYYYMMDD_HHMMSS.csv`
-
-## CSV Output Format
-
-The application generates a CSV with 51 columns matching Asana's import format:
-
-**Key Columns Populated:**
-- Name, Section/Column, Projects, Parent task
-- Estimated time, Priority, Device
-- Iteration_01, Average, Perf_BRD
-- Deviation % Current Vs BRD
-- GREEN, YELLOW, RED
-- Previous Value (from BRD lookup)
-
-## Tips & Best Practices
-
-### Task Organization
-1. Create all sections before importing tasks
-2. Use consistent parent task names for proper hierarchy
-3. Review the Manual Tasks tab to verify structure
-
-### Excel Template Tips
-1. Use the "Applicable" column to control which tasks import
-2. Keep task names consistent with BRD file for auto-matching
-3. Include parent task names for proper nesting
-
-### BRD Data Matching
-- App uses fuzzy matching on task names and devices
-- Exact matches preferred
-- Falls back to default values if no match found
-
-### Performance Optimization
-- Import tasks by device for better organization
-- Use Preview before importing large datasets
-- Clear data between different projects
-
-## Troubleshooting
-
-### "Please install pandas" Error
-```bash
-pip install pandas openpyxl
-```
-
-### Tasks Not Showing in Preview
-- Verify "Applicable" column has values
-- Check Excel sheet name is selected
-- Ensure template loaded successfully (green checkmark)
-
-### BRD Data Not Matching
-- Verify BRD file is loaded (green checkmark in header)
-- Check task names match between template and BRD
-- Verify device names match
-- Select correct BRD sheet type (SBR vs Mainline)
-
-### Import Issues in Asana
-- Refresh preview to verify CSV structure
-- Check all required fields are populated
-- Ensure section names match exactly
-
-## Advanced Features
-
-### Manual Task Entry
-Use the **Manual Tasks** tab for single task entry when needed
-
-### Duplicate Prevention
-- Review tasks in tree before importing more
-- Use Clear All to start fresh
-
-### Multi-Device Projects
-1. Import each device separately
-2. Select appropriate device each time
-3. Keep same sections for consistency
-
-## Support
-
-For issues or questions about:
-- **Application**: Check this README
-- **Asana Import**: Consult Asana's CSV import documentation
-- **Excel Format**: Review the sample CSV provided
 
 ## Version History
 
-### V2.0 (Current)
-- Excel template import
-- BRD data integration
-- Quick import interface
-- Auto-file detection
-- Device filtering
-- Enhanced UI
+### v4.1 (Current) — Bug Fixes & Improvements
+**Bug Fixes:**
+- 🐛 Fixed `_format_time` unreachable fallback branch — now correctly handles Excel decimal time format vs minutes
+- 🐛 Fixed bare `except:` in `load_all_template_sheets` that silently swallowed errors
+- 🐛 Fixed resource leak in `get_sheet_names` — `ExcelFile` was never closed
+- 🐛 Fixed resource leak in `load_brd_raw` and `load_all_sheets_as_raw` — workbooks now closed in `finally` blocks
+- 🐛 Removed redundant `from core.data_loader import DataLoader` re-import in `_load_default_template`
+- 🐛 Fixed inconsistent highlight colors between `ColumnHighlightDelegate` (bright test colors) and dialog class (production colors)
 
-### V1.0
-- Basic CSV generation
-- Manual task entry
-- Section management
+**New Features:**
+- ✨ BRD sheet change now auto-resets column selections (prevents stale column indices)
+- ✨ Individual queue item removal via right-click context menu
+- ✨ Comprehensive logging throughout all modules (`asana_generator.log`)
+- ✨ Application startup error handling with user-friendly error dialog
+- ✨ Extended `sanitize_numeric_value` to handle more text values ('not applicable', 'pending', 'skip', 'skipped')
 
-## File Structure
+**Code Quality:**
+- 🔧 Replaced all `print()` debug statements with proper `logging` module usage
+- 🔧 Added structured loggers per module (`AsanaGenerator.MainWindow`, `.DataLoader`, `.BrdMatcher`, `.BrdViewer`)
+- 🔧 Updated `.gitignore` to exclude deprecated script files and backups
+- 🔧 Version bumped to v4.1 in window title
+
+### v4.0
+- Full PyQt5 desktop application with web app feature parity
+- BRD spreadsheet viewer with visual column selection
+- OOBE multi-criteria matching
+- Configuration queue with persistence
+- Light theme UI
+
+### v3.0
+- Enhanced generator with comprehensive logging
+- Web interface (`asana_generator_web.html`)
+
+### v2.0
+- Excel template import, BRD data integration
+- Quick import interface, device filtering
+
+### v1.0
+- Basic CSV generation with manual task entry
+
+## Template Format
+
+### Required Columns
+| Column | Description |
+|--------|-------------|
+| `Performance Scenario` or `Scenario Name` | Task/scenario name for BRD matching |
+| `Applicable Devices` | Comma-separated device list (e.g., "Malbec,Cava,Barolo") |
+| `Priority` | Task priority (P0, P1, P2, etc.) |
+| `Estimated Time` | Duration in minutes |
+
+### OOBE-Specific Columns
+| Column | Description |
+|--------|-------------|
+| `New_Dashboard_Component` | Dashboard component identifier |
+| `Sub_Priority` | Sub-priority for OOBE matching |
+
+## Logging
+
+All operations are logged to `asana_generator_app/asana_generator.log`:
 ```
-ASANA_Dashboard/
-├── asana_csv_generator_v2.py  # Main application (Enhanced)
-├── asana_csv_generator.py     # Original version
-├── README.md                   # This file
-├── J19.2_SBR_J19.3_Mainline.csv  # Sample format
-└── Juno_Mainline_Performance_Results_Mar_J19.3 (6).xlsx  # BRD data
+2026-02-12 11:00:00 [INFO] AsanaGenerator: Application started successfully
+2026-02-12 11:00:01 [INFO] AsanaGenerator.DataLoader: Template loaded: 45 rows, 8 columns
+2026-02-12 11:00:05 [INFO] AsanaGenerator.MainWindow: Added to queue: 'P1 Malbec' - Malbec - Sheet1 (32 tasks)
 ```
 
 ## License

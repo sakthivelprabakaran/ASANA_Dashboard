@@ -1,0 +1,46 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Virtual environments
+venv/
+.env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Excel temp files
+~$*.xlsx
+~$*.xls
+
+# Logs
+*.log
+
+# Output files
+asana_import_*.csv
+asana_export*.csv
+
+# Queue persistence
+.asana_queue.json
+
+# Backup files
+*.backup
+*.bak
+
+# Deprecated generator scripts (kept locally, not tracked)
+asana_csv_generator.py
+asana_csv_generator_v2.py
+asana_csv_generator_v3.py
+asana_csv_generator_v4.py

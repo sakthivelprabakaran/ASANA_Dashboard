@@ -1,17 +1,18 @@
 """
-Asana CSV Generator v4.0 - Desktop Application
+Asana CSV Generator v4.1 - Desktop Application
 Full feature parity with web application.
 Senior Developer perspective: Clean UX, web app terminology, intelligent matching.
 """
 
 import os
 import json
+import logging
 import pandas as pd
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, 
                              QLabel, QLineEdit, QPushButton, QFileDialog, 
                              QComboBox, QTableView, QHeaderView, QMessageBox, QGroupBox, 
                              QScrollArea, QSplitter, QFrame, QListWidget, QListWidgetItem,
-                             QTextEdit, QAbstractItemView)
+                             QTextEdit, QAbstractItemView, QMenu, QAction)
 from PyQt5.QtCore import Qt, QAbstractTableModel
 from PyQt5.QtGui import QColor, QFont
 
@@ -19,9 +20,11 @@ from core.data_loader import DataLoader
 from core.brd_matcher import BrdMatcher
 from ui.brd_viewer_dialog import BrdViewerDialog
 
+logger = logging.getLogger('AsanaGenerator.MainWindow')
+
 # Full device list matching web app exactly
-DEVICES = ['Malbec', 'Cava', 'Barolo', 'Rossini', 'Sangria', 'Pisco', 'Seabreeze', 
-           'Gibson', 'Paloma', 'Calvados', 'Eanab', 'Decanter']
+DEVICES = ['Malbec', 'Cava', 'Barolo', 'Rossini', 'Sangria', 'Pisco', 'Seabreeze',
+           'Gibson', 'Paloma', 'Calvados', 'Eanab', 'Decanter', 'Prosecco', 'Marsala']
 
 
 class TaskTableModel(QAbstractTableModel):
@@ -522,6 +525,7 @@ class MainWindow(QMainWindow):
         
         # Connect signals after all UI elements are created
         self.combo_template_sheet.currentIndexChanged.connect(self._on_template_sheet_changed)
+        self.combo_brd_sheet.currentIndexChanged.connect(self._on_brd_sheet_changed)
 
     def _separator(self):
         """Create a visual separator line."""
@@ -534,6 +538,20 @@ class MainWindow(QMainWindow):
     # FILE LOADERS
     # ====================
     
+    def _on_brd_sheet_changed(self):
+        """Handle BRD sheet selection changes. Reset column selections when sheet changes."""
+        self.selectedPerfCol = {"name": "", "columnIndex": -1}
+        self.selectedPrevCol = {"name": "", "columnIndex": -1}
+        self.lbl_perf_col.setText("Not selected")
+        self.lbl_prev_col.setText("Not selected")
+        self.lbl_perf_col.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 10px;")
+        self.lbl_prev_col.setStyleSheet("color: #94a3b8; font-weight: bold; font-size: 10px;")
+        
+        sheet_name = self._get_sheet_name(self.combo_brd_sheet)
+        if sheet_name:
+            logger.info(f"BRD sheet changed to: {sheet_name}")
+            self.lbl_status.setText(f"BRD sheet: {sheet_name} — Select columns via Spreadsheet Viewer")
+
     def _on_template_sheet_changed(self):
         """Handle template sheet selection changes. Show OOBE component dropdown if OOBE sheet."""
         sheet_name = self._get_sheet_name(self.combo_template_sheet)
@@ -595,8 +613,10 @@ class MainWindow(QMainWindow):
                 self.combo_template_sheet.addItem(f"{name} ({len(df)} rows)", name)
                 
             self.lbl_status.setText(f"Template loaded: {len(self.templateSheets)} sheet(s)")
+            logger.info(f"Template loaded: {os.path.basename(fname)} with {len(self.templateSheets)} sheets")
             
         except Exception as e:
+            logger.error(f"Failed to load template: {e}")
             QMessageBox.critical(self, "Error", f"Failed to load template:\n{str(e)}")
             self.lbl_template.setText("❌ Error loading file")
             self.lbl_template.setStyleSheet("color: #ef4444;")
@@ -622,15 +642,17 @@ class MainWindow(QMainWindow):
                 row_count = len(data) - 1 if data else 0
                 self.combo_brd_sheet.addItem(f"{name} ({row_count} rows)", name)
                 
-            # Reset column selections
+            # Reset column selections (handled by _on_brd_sheet_changed signal)
             self.selectedPerfCol = {"name": "", "columnIndex": -1}
             self.selectedPrevCol = {"name": "", "columnIndex": -1}
             self.lbl_perf_col.setText("Not selected")
             self.lbl_prev_col.setText("Not selected")
             
             self.lbl_status.setText(f"BRD loaded: {len(self.brdSheets)} sheet(s) - Now select columns")
+            logger.info(f"BRD loaded: {os.path.basename(fname)} with {len(self.brdSheets)} sheets")
             
         except Exception as e:
+            logger.error(f"Failed to load BRD: {e}")
             QMessageBox.critical(self, "Error", f"Failed to load BRD:\n{str(e)}")
             self.lbl_brd.setText("❌ Error loading file")
             self.lbl_brd.setStyleSheet("color: #ef4444;")
@@ -742,29 +764,16 @@ class MainWindow(QMainWindow):
             if not self._is_device_applicable_in_template(row, device):
                 continue
                 
-            # Check BRD matching (if BRD is loaded) - use OOBE matching if applicable
+            # Check BRD matching (if BRD is loaded) - unified matching
             if brd_data and len(brd_data) > 1:
-                # Check if this is an OOBE sheet
-                if self._is_oobe_sheet(template_df, sheet_name):
-                    # Get component from dropdown (user-selected)
-                    component = self.combo_dashboard_component.currentText()
-                    
-                    # Use enhanced OOBE matching (component only, no priority)
-                    brd_match = self.brdMatcher.get_brd_data_for_oobe_task(
-                        scenario, device, component, '',  # Empty priority
-                        brd_data,
-                        self.selectedPerfCol.get('columnIndex', -1),
-                        self.selectedPrevCol.get('columnIndex', -1)
-                    )
-                else:
-                    # Use standard matching
-                    brd_match = self.brdMatcher.get_brd_data_for_task(
-                        scenario, device, brd_data, 
-                        self.selectedPerfCol.get('columnIndex', -1),
-                        self.selectedPrevCol.get('columnIndex', -1)
-                    )
+                brd_match = self._match_brd_for_task(
+                    scenario, device, row, template_df, sheet_name,
+                    brd_data,
+                    self.selectedPerfCol.get('columnIndex', -1),
+                    self.selectedPrevCol.get('columnIndex', -1)
+                )
                 
-                if not brd_match['applicable']:
+                if not brd_match.get('applicable', True):
                     continue
             
             # This task is applicable!
@@ -798,22 +807,56 @@ class MainWindow(QMainWindow):
         self.inp_parent.setFocus()
         
         self.lbl_status.setText(f"Added: {parent_task} ({task_count} tasks)")
+        logger.info(f"Added to queue: '{parent_task}' - {device} - {sheet_name} ({task_count} tasks)")
 
     def _render_queue(self):
-        """Render the queue as list items."""
+        """Render the queue as list items with right-click context menu."""
         self.queue_list.clear()
         
         total_tasks = 0
         for idx, config in enumerate(self.configQueue):
-            total_tasks += config['estimatedTasks']
+            total_tasks += config.get('estimatedTasks', 0)
             
-            text = f"📌 {config['parentTask']}  •  📱 {config['device']}  •  📄 {config['templateSheet']}  •  ~{config['estimatedTasks']} tasks"
+            text = f"📌 {config['parentTask']}  •  📱 {config['device']}  •  📄 {config['templateSheet']}  •  ~{config.get('estimatedTasks', 0)} tasks"
             
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, idx)
             self.queue_list.addItem(item)
+        
+        # Enable context menu for individual item removal
+        self.queue_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        try:
+            self.queue_list.customContextMenuRequested.disconnect()
+        except TypeError:
+            pass
+        self.queue_list.customContextMenuRequested.connect(self._show_queue_context_menu)
             
         self.lbl_queue_count.setText(f"{len(self.configQueue)} configuration(s), ~{total_tasks} tasks")
+
+    def _show_queue_context_menu(self, position):
+        """Show right-click context menu on queue items for removal."""
+        item = self.queue_list.itemAt(position)
+        if not item:
+            return
+        
+        idx = item.data(Qt.UserRole)
+        menu = QMenu(self)
+        
+        remove_action = menu.addAction("🗑️ Remove this configuration")
+        remove_action.setData(idx)
+        
+        action = menu.exec_(self.queue_list.mapToGlobal(position))
+        if action == remove_action:
+            self._remove_queue_item(idx)
+
+    def _remove_queue_item(self, index: int):
+        """Remove a single item from the queue by index."""
+        if 0 <= index < len(self.configQueue):
+            removed = self.configQueue.pop(index)
+            logger.info(f"Removed from queue: {removed.get('parentTask', 'unknown')}")
+            self._render_queue()
+            self._save_queue_to_file()
+            self.lbl_status.setText(f"Removed: {removed.get('parentTask', '')}")
 
     def clear_queue(self):
         """Clear all configurations from queue."""
@@ -834,6 +877,70 @@ class MainWindow(QMainWindow):
     # ====================
     # PREVIEW & EXPORT
     # ====================
+
+    def _is_new_feature_brd_sheet(self, brd_data: list) -> bool:
+        """
+        Check if the BRD sheet is a 'New Feature' sheet that groups multiple feature
+        categories (Color Stroke, HWR Search, Keyboard Canvas, Q&A) in one sheet.
+        
+        Detected by presence of a 'New Feature' column in BRD data headers.
+        """
+        if not brd_data or len(brd_data) < 1:
+            return False
+        return self.brdMatcher.find_new_feature_column(brd_data) != -1
+
+    def _get_feature_category_from_row(self, row) -> str:
+        """
+        Get the feature category from a Template row.
+        Uses the 'Priority' column value as the feature category for New Feature matching.
+        """
+        priority = row.get('Priority', '')
+        if str(priority).lower() in ['nan', 'none', '']:
+            return ''
+        return str(priority).strip()
+
+    def _match_brd_for_task(self, scenario: str, device: str, template_row, 
+                            template_df, template_sheet: str, brd_data: list,
+                            perf_idx: int, prev_idx: int, config: dict = None) -> dict:
+        """
+        Unified BRD matching logic that selects the appropriate matching strategy based on the BRD sheet type:
+        1. OOBE sheet: utilizes multi-criteria matching
+        2. New Feature BRD sheet: leverages scenario mapping
+        3. Standard sheet: applies basic matching
+
+        Returns:
+            Dict with {applicable, perf_value, prev_value}
+        """
+        if not brd_data or len(brd_data) < 2:
+            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        
+        # Strategy 1: OOBE matching
+        if self._is_oobe_sheet(template_df, template_sheet):
+            component = ''
+            if config:
+                component = config.get('oobeComponent', '')
+            elif self.combo_dashboard_component.isVisible():
+                component = self.combo_dashboard_component.currentText()
+            
+            return self.brdMatcher.get_brd_data_for_oobe_task(
+                scenario, device, component, '',
+                brd_data, perf_idx, prev_idx
+            )
+        
+        # Strategy 2: New Feature matching (BRD has 'New Feature' column)
+        if self._is_new_feature_brd_sheet(brd_data):
+            feature_category = self._get_feature_category_from_row(template_row)
+            if feature_category:
+                logger.debug(f"Using New Feature matching: scenario='{scenario}', feature='{feature_category}'")
+                return self.brdMatcher.get_brd_data_for_new_feature_task(
+                    scenario, device, feature_category,
+                    brd_data, perf_idx, prev_idx
+                )
+        
+        # Strategy 3: Standard matching
+        return self.brdMatcher.get_brd_data_for_task(
+            scenario, device, brd_data, perf_idx, prev_idx
+        )
 
     def _is_oobe_sheet(self, template_df, sheet_name: str) -> bool:
         """
@@ -946,26 +1053,13 @@ class MainWindow(QMainWindow):
                     skipped_template += 1
                     continue
                     
-                # STEP 2: Fetch BRD data (Perf and Previous values)
+                # STEP 2: Fetch BRD data (Perf and Previous values) - unified matching
                 brd_match = {'perf_value': '-', 'prev_value': '-'}
                 if brd_data and len(brd_data) > 1:
-                    is_oobe = self._is_oobe_sheet(template_df, template_sheet)
-                    
-                    # Check if this is an OOBE sheet - use OOBE matching if so
-                    if is_oobe:
-                        # Get component from config (saved when added to queue)
-                        component = config.get('oobeComponent', '')
-                        
-                        # Use OOBE matching
-                        brd_match = self.brdMatcher.get_brd_data_for_oobe_task(
-                            scenario, device, component, '',  # Empty priority
-                            brd_data, perf_idx, prev_idx
-                        )
-                    else:
-                        # Use standard matching
-                        brd_match = self.brdMatcher.get_brd_data_for_task(
-                            scenario, device, brd_data, perf_idx, prev_idx
-                        )
+                    brd_match = self._match_brd_for_task(
+                        scenario, device, row, template_df, template_sheet,
+                        brd_data, perf_idx, prev_idx, config=config
+                    )
                     
                 # Get Priority from Template
                 priority = row.get('Priority', '')
@@ -1005,7 +1099,13 @@ class MainWindow(QMainWindow):
         self.lbl_status.setText(status)
 
     def _format_time(self, value) -> str:
-        """Format time value for Asana (H:MM format). Simple numbers are treated as minutes."""
+        """Format time value for Asana (H:MM format). 
+        
+        Handles:
+        - Already formatted values (e.g., "1:30", "30m", "2h")
+        - Simple integers >= 1 treated as minutes (e.g., 90 -> "1:30")
+        - Excel decimal format (fraction of 24 hours, e.g., 0.0625 -> "1:30")
+        """
         if not value or str(value).lower() in ['nan', 'none', '']:
             return '-'
         val_str = str(value).strip()
@@ -1014,23 +1114,27 @@ class MainWindow(QMainWindow):
         if any(c in val_str for c in [':', 's', 'm', 'h']):
             return val_str
         
-        # Try to parse as simple number (treat as minutes and convert to H:MM)
         try:
             num = float(val_str)
-            # Convert minutes to hours:minutes format
-            hours = int(num // 60)
-            minutes = int(num % 60)
-            return f"{hours}:{minutes:02d}"
-        except:
-            # If it fails, might be Excel decimal format (fraction of 24 hours)
-            try:
-                num = float(val_str)
-                total_seconds = int(num * 24 * 60 * 60)
-                hours, remainder = divmod(total_seconds, 3600)
-                minutes, seconds = divmod(remainder, 60)
+            
+            if num < 0:
+                return '-'
+            
+            # Distinguish between minutes (>=1) and Excel decimal format (<1)
+            if num >= 1:
+                # Treat as minutes (e.g., 90 -> 1:30)
+                hours = int(num // 60)
+                minutes = int(num % 60)
                 return f"{hours}:{minutes:02d}"
-            except:
-                return val_str
+            else:
+                # Excel decimal format: fraction of 24 hours (e.g., 0.0625 = 1.5 hours)
+                total_minutes = int(num * 24 * 60)
+                hours = total_minutes // 60
+                minutes = total_minutes % 60
+                return f"{hours}:{minutes:02d}"
+        except (ValueError, TypeError):
+            logger.debug(f"Could not parse time value: '{value}'")
+            return val_str
 
     def export_csv(self):
         """Export all tasks to CSV in Asana format."""
@@ -1125,26 +1229,15 @@ class MainWindow(QMainWindow):
                 if not self._is_device_applicable_in_template(template_row, device):
                     continue
                     
-                # STEP 2: Match with BRD (if loaded) - use OOBE matching if applicable
+                # STEP 2: Match with BRD (if loaded) - unified matching
                 brd_match = {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
                 if brd_data and len(brd_data) > 1:
-                    # Check if this is an OOBE sheet
-                    if self._is_oobe_sheet(template_df, template_sheet):
-                        # Get component from config (user-selected)
-                        component = config.get('oobeComponent', '')
-                        
-                        # Use enhanced OOBE matching (component only, no priority)
-                        brd_match = self.brdMatcher.get_brd_data_for_oobe_task(
-                            scenario, device, component, '',  # Empty priority
-                            brd_data, perf_idx, prev_idx
-                        )
-                    else:
-                        # Use standard matching
-                        brd_match = self.brdMatcher.get_brd_data_for_task(
-                            scenario, device, brd_data, perf_idx, prev_idx
-                        )
+                    brd_match = self._match_brd_for_task(
+                        scenario, device, template_row, template_df, template_sheet,
+                        brd_data, perf_idx, prev_idx, config=config
+                    )
                     
-                    if not brd_match['applicable']:
+                    if not brd_match.get('applicable', True):
                         continue
                     
                 est_time = template_row.get('Estimated Time') or template_row.get('Time', '')
@@ -1184,8 +1277,7 @@ class MainWindow(QMainWindow):
             with open(self.queue_file, 'w') as f:
                 json.dump(self.configQueue, f, indent=2)
         except Exception as e:
-            # Silently fail - queue persistence is a convenience feature
-            print(f"Warning: Could not save queue: {e}")
+            logger.warning(f"Could not save queue: {e}")
     
     def _load_queue_from_file(self):
         """Load queue from JSON file if it exists."""
@@ -1199,8 +1291,9 @@ class MainWindow(QMainWindow):
             if self.configQueue:
                 self._render_queue()
                 self.lbl_status.setText(f"Loaded {len(self.configQueue)} saved configuration(s)")
+                logger.info(f"Loaded {len(self.configQueue)} saved queue configurations")
         except Exception as e:
-            print(f"Warning: Could not load queue: {e}")
+            logger.warning(f"Could not load queue: {e}")
             self.configQueue = []
     
     def _load_default_template(self):
@@ -1210,7 +1303,6 @@ class MainWindow(QMainWindow):
             return
             
         try:
-            from core.data_loader import DataLoader
             loader = DataLoader()
             
             # Load all template sheets
@@ -1232,8 +1324,10 @@ class MainWindow(QMainWindow):
                     self.combo_template_sheet.addItem(f"📄 {sheet_name}", sheet_name)
                 
                 self.lbl_status.setText(f"✓ Auto-loaded default template: {len(sheets)} sheet(s)")
+                logger.info(f"Auto-loaded default template: {len(sheets)} sheets")
             else:
                 self.lbl_status.setText("⚠️ Failed to load default template")
+                logger.warning("Default template loaded but contains no valid sheets")
         except Exception as e:
-            print(f"Warning: Could not auto-load template: {e}")
+            logger.warning(f"Could not auto-load template: {e}")
             self.lbl_status.setText(f"⚠️ Template auto-load error: {str(e)}")

@@ -355,6 +355,149 @@ class BrdMatcher:
         # No match found
         return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
 
+    def find_new_feature_column(self, brd_data: List[List[Any]]) -> int:
+        """
+        Find a 'New Feature' column in BRD data headers.
+        
+        This identifies BRD sheets that group multiple feature categories
+        (e.g., Color Stroke, HWR Search, Keyboard Canvas) in a single sheet.
+        
+        Args:
+            brd_data: Raw BRD data as list of lists
+            
+        Returns:
+            Column index if found, -1 otherwise
+        """
+        if not brd_data or len(brd_data) < 1:
+            return -1
+        
+        # Scan first few rows for "New Feature" or "Feature" column
+        scan_rows = brd_data[:5]
+        
+        def is_new_feature_col(h):
+            h_str = str(h or '').lower().strip()
+            return (h_str == 'new feature' or 
+                    h_str == 'new_feature' or
+                    h_str == 'feature category' or
+                    h_str == 'feature_category' or
+                    'new feature' in h_str or
+                    'new_feature' in h_str)
+        
+        for row in scan_rows:
+            for c_idx, val in enumerate(row):
+                if is_new_feature_col(val):
+                    return c_idx
+        
+        return -1
+
+    def get_brd_data_for_new_feature_task(self, scenario_name: str, device: str,
+                                           feature_category: str,
+                                           brd_data: List[List[Any]],
+                                           perf_col_index: int, prev_col_index: int,
+                                           debug: bool = False) -> Dict[str, Any]:
+        """
+        BRD matching for 'New Feature' sheets that contain multiple feature categories.
+        
+        Matches on:
+        1. Scenario Name (normalized)
+        2. Feature Category (from 'New Feature' column in BRD matching Template's Priority)
+        
+        Args:
+            scenario_name: The task/scenario name to match
+            device: Target device (for logging only)
+            feature_category: Feature category from Template's Priority column
+            brd_data: Raw BRD data as list of lists
+            perf_col_index: Index of the Perf BRD column
+            prev_col_index: Index of the Previous Value column
+            debug: Whether to print debug info
+            
+        Returns:
+            Dict with {applicable, perf_value, prev_value}
+        """
+        if not brd_data or not scenario_name or len(brd_data) < 2:
+            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        
+        # Find the New Feature column
+        feature_col_idx = self.find_new_feature_column(brd_data)
+        if feature_col_idx == -1:
+            # No New Feature column - fall back to standard matching
+            return self.get_brd_data_for_task(
+                scenario_name, device, brd_data, perf_col_index, prev_col_index, debug
+            )
+        
+        # Find scenario column
+        scan_rows = brd_data[:10]
+        
+        def is_performance_scenario_col(h):
+            h_str = str(h or '').lower()
+            return ('performance scenario' in h_str or 
+                    'performance scanrio' in h_str or
+                    'performance scenarios' in h_str)
+        
+        def is_any_scenario_col(h):
+            h_str = str(h or '').lower()
+            return ('performance scenario' in h_str or 
+                    'performance scanrio' in h_str or
+                    'scenario name' in h_str or 
+                    ('performance' in h_str and 'sc' in h_str) or
+                    h_str == 'name')
+        
+        def find_col_in_scan_rows(predicate):
+            for r_idx, row in enumerate(scan_rows):
+                for c_idx, val in enumerate(row):
+                    if predicate(val):
+                        return c_idx
+            return -1
+        
+        scenario_col_idx = find_col_in_scan_rows(is_performance_scenario_col)
+        if scenario_col_idx == -1:
+            scenario_col_idx = find_col_in_scan_rows(is_any_scenario_col)
+        
+        if scenario_col_idx == -1:
+            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        
+        # Normalize inputs
+        normalized_scenario = self.normalize_scenario_name(scenario_name)
+        normalized_feature = self.normalize_scenario_name(feature_category)
+        
+        # Search through data rows
+        start_row = 2
+        for row_idx, row in enumerate(brd_data[start_row:], start=start_row):
+            if not row or len(row) == 0:
+                continue
+            
+            # MATCH 1: Scenario name
+            row_scenario_raw = row[scenario_col_idx] if scenario_col_idx < len(row) else ''
+            row_scenario = self.normalize_scenario_name(row_scenario_raw)
+            
+            if row_scenario != normalized_scenario:
+                continue
+            
+            # MATCH 2: Feature category
+            row_feature_raw = row[feature_col_idx] if feature_col_idx < len(row) else ''
+            row_feature = self.normalize_scenario_name(row_feature_raw)
+            
+            if normalized_feature and row_feature != normalized_feature:
+                continue
+            
+            # Match found! Extract values
+            perf_value = '-'
+            if perf_col_index != -1 and perf_col_index < len(row):
+                perf_value = self.sanitize_numeric_value(row[perf_col_index])
+            
+            prev_value = '-'
+            if prev_col_index != -1 and prev_col_index < len(row):
+                prev_value = self.sanitize_numeric_value(row[prev_col_index])
+            
+            return {
+                'applicable': True,
+                'perf_value': perf_value,
+                'prev_value': prev_value
+            }
+        
+        # No match found
+        return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+
     def batch_match(self, tasks: List[Dict[str, Any]], device: str,
                     brd_data: List[List[Any]], 
                     perf_col_index: int, prev_col_index: int) -> List[Dict[str, Any]]:

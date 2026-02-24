@@ -48,7 +48,9 @@ class BrdWriter:
             output_path = brd_file_path
         
         # Load workbook with openpyxl (NOT read_only — need write access)
-        wb = openpyxl.load_workbook(brd_file_path)
+        # keep_links=True preserves external references
+        # We do NOT use data_only=True here — that would strip all formulas
+        wb = openpyxl.load_workbook(brd_file_path, keep_links=True)
         ws = wb[sheet_name]
         
         # Build BRD scenario lookup from the sheet
@@ -129,8 +131,13 @@ class BrdWriter:
         
         # Save workbook
         if not dry_run and matched:
-            wb.save(output_path)
-            logger.info(f"BRD file saved: {len(matched)} values written to '{output_path}'")
+            try:
+                wb.save(output_path)
+                logger.info(f"BRD file saved: {len(matched)} values written to '{output_path}'")
+            except Exception as save_err:
+                logger.error(f"Failed to save BRD file: {save_err}")
+                wb.close()
+                raise Exception(f"Failed to save: {save_err}")
         
         wb.close()
         

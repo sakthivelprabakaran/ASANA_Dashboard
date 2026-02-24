@@ -80,10 +80,13 @@ class BrdViewerDialog(QDialog):
     COLOR_MATCH = QColor(147, 197, 253)   # Light blue (#93c5fd) - fully opaque
     COLOR_HEADER = QColor(241, 245, 249)
     
-    def __init__(self, brd_data: List[List[Any]], parent=None, initial_search: str = ""):
+    def __init__(self, brd_data: List[List[Any]], parent=None, initial_search: str = "", 
+                 single_column_mode: bool = False, single_column_label: str = "🎯 Target Column"):
         super().__init__(parent)
         self.brd_data = brd_data
         self.initial_search = initial_search  # Device name for auto-search
+        self.single_column_mode = single_column_mode  # Only select one column (for Report Generator)
+        self.single_column_label = single_column_label
         
         # Use first row as headers (fallback to indexes)
         self.headers = []
@@ -175,24 +178,42 @@ class BrdViewerDialog(QDialog):
         mode_layout.setContentsMargins(0, 0, 0, 0)
         mode_layout.setSpacing(15)
         
-        mode_label = QLabel("Select Column Type:")
-        mode_label.setStyleSheet("color: #1e293b; font-weight: bold;")
-        mode_layout.addWidget(mode_label)
-        
-        self.btn_mode_perf = QPushButton("🎯 Performance/BRD Column (Green)")
-        self.btn_mode_perf.setObjectName("modePerf")
-        self.btn_mode_perf.setCheckable(True)
-        self.btn_mode_perf.setChecked(True)
-        self.btn_mode_perf.clicked.connect(lambda: self.set_selection_mode("perf"))
-        self.btn_mode_perf.setCursor(Qt.PointingHandCursor)
-        mode_layout.addWidget(self.btn_mode_perf)
-        
-        self.btn_mode_prev = QPushButton("📊 Previous Value Column (Orange)")
-        self.btn_mode_prev.setObjectName("modePrev")
-        self.btn_mode_prev.setCheckable(True)
-        self.btn_mode_prev.clicked.connect(lambda: self.set_selection_mode("prev"))
-        self.btn_mode_prev.setCursor(Qt.PointingHandCursor)
-        mode_layout.addWidget(self.btn_mode_prev)
+        if self.single_column_mode:
+            # Single column mode (Report Generator) - simpler UI
+            mode_label = QLabel(f"Click a column header to select the target column:")
+            mode_label.setStyleSheet("color: #1e293b; font-weight: bold;")
+            mode_layout.addWidget(mode_label)
+            
+            self.btn_mode_perf = QPushButton(self.single_column_label)
+            self.btn_mode_perf.setObjectName("modePerf")
+            self.btn_mode_perf.setCheckable(True)
+            self.btn_mode_perf.setChecked(True)
+            self.btn_mode_perf.setCursor(Qt.PointingHandCursor)
+            mode_layout.addWidget(self.btn_mode_perf)
+            
+            # Hidden prev button (not used in single mode)
+            self.btn_mode_prev = QPushButton("")
+            self.btn_mode_prev.hide()
+        else:
+            # Dual column mode (Task Creator) - original UI
+            mode_label = QLabel("Select Column Type:")
+            mode_label.setStyleSheet("color: #1e293b; font-weight: bold;")
+            mode_layout.addWidget(mode_label)
+            
+            self.btn_mode_perf = QPushButton("🎯 Performance/BRD Column (Green)")
+            self.btn_mode_perf.setObjectName("modePerf")
+            self.btn_mode_perf.setCheckable(True)
+            self.btn_mode_perf.setChecked(True)
+            self.btn_mode_perf.clicked.connect(lambda: self.set_selection_mode("perf"))
+            self.btn_mode_perf.setCursor(Qt.PointingHandCursor)
+            mode_layout.addWidget(self.btn_mode_perf)
+            
+            self.btn_mode_prev = QPushButton("📊 Previous Value Column (Orange)")
+            self.btn_mode_prev.setObjectName("modePrev")
+            self.btn_mode_prev.setCheckable(True)
+            self.btn_mode_prev.clicked.connect(lambda: self.set_selection_mode("prev"))
+            self.btn_mode_prev.setCursor(Qt.PointingHandCursor)
+            mode_layout.addWidget(self.btn_mode_prev)
         
         mode_layout.addStretch()
         
@@ -287,51 +308,79 @@ class BrdViewerDialog(QDialog):
         selection_layout = QHBoxLayout(selection_widget)
         selection_layout.setSpacing(20)
         
-        # Perf selection box
-        perf_box = QFrame()
-        perf_box.setStyleSheet("""
-            QFrame {
-                background-color: #ecfdf5; 
-                border: 2px solid #10b981; 
-                border-radius: 8px;
-            }
-        """)
-        perf_layout = QVBoxLayout(perf_box)
-        perf_layout.setContentsMargins(15, 12, 15, 12)
-        
-        perf_title = QLabel("✓ Perf/BRD Column:")
-        perf_title.setStyleSheet("color: #059669; font-weight: bold;")
-        perf_layout.addWidget(perf_title)
-        
-        self.lbl_selected_perf = QLabel("Click a column header to select")
-        self.lbl_selected_perf.setStyleSheet("color: #047857; font-size: 14px;")
-        self.lbl_selected_perf.setWordWrap(True)
-        perf_layout.addWidget(self.lbl_selected_perf)
-        
-        selection_layout.addWidget(perf_box, 1)
-        
-        # Prev selection box
-        prev_box = QFrame()
-        prev_box.setStyleSheet("""
-            QFrame {
-                background-color: #fef3c7; 
-                border: 2px solid #f59e0b; 
-                border-radius: 8px;
-            }
-        """)
-        prev_layout = QVBoxLayout(prev_box)
-        prev_layout.setContentsMargins(15, 12, 15, 12)
-        
-        prev_title = QLabel("✓ Previous Value Column:")
-        prev_title.setStyleSheet("color: #b45309; font-weight: bold;")
-        prev_layout.addWidget(prev_title)
-        
-        self.lbl_selected_prev = QLabel("Click a column header to select")
-        self.lbl_selected_prev.setStyleSheet("color: #92400e; font-size: 14px;")
-        self.lbl_selected_prev.setWordWrap(True)
-        prev_layout.addWidget(self.lbl_selected_prev)
-        
-        selection_layout.addWidget(prev_box, 1)
+        if self.single_column_mode:
+            # Single column display (Report Generator)
+            target_box = QFrame()
+            target_box.setStyleSheet("""
+                QFrame {
+                    background-color: #f5f3ff; 
+                    border: 2px solid #7c3aed; 
+                    border-radius: 8px;
+                }
+            """)
+            target_layout = QVBoxLayout(target_box)
+            target_layout.setContentsMargins(15, 12, 15, 12)
+            
+            target_title = QLabel(f"✓ {self.single_column_label}:")
+            target_title.setStyleSheet("color: #7c3aed; font-weight: bold; font-size: 14px;")
+            target_layout.addWidget(target_title)
+            
+            self.lbl_selected_perf = QLabel("Click a column header to select")
+            self.lbl_selected_perf.setStyleSheet("color: #6d28d9; font-size: 14px;")
+            self.lbl_selected_perf.setWordWrap(True)
+            target_layout.addWidget(self.lbl_selected_perf)
+            
+            selection_layout.addWidget(target_box, 1)
+            
+            # Hidden prev label (not used)
+            self.lbl_selected_prev = QLabel("")
+        else:
+            # Dual column display (Task Creator) - original
+            # Perf selection box
+            perf_box = QFrame()
+            perf_box.setStyleSheet("""
+                QFrame {
+                    background-color: #ecfdf5; 
+                    border: 2px solid #10b981; 
+                    border-radius: 8px;
+                }
+            """)
+            perf_layout = QVBoxLayout(perf_box)
+            perf_layout.setContentsMargins(15, 12, 15, 12)
+            
+            perf_title = QLabel("✓ Perf/BRD Column:")
+            perf_title.setStyleSheet("color: #059669; font-weight: bold;")
+            perf_layout.addWidget(perf_title)
+            
+            self.lbl_selected_perf = QLabel("Click a column header to select")
+            self.lbl_selected_perf.setStyleSheet("color: #047857; font-size: 14px;")
+            self.lbl_selected_perf.setWordWrap(True)
+            perf_layout.addWidget(self.lbl_selected_perf)
+            
+            selection_layout.addWidget(perf_box, 1)
+            
+            # Prev selection box
+            prev_box = QFrame()
+            prev_box.setStyleSheet("""
+                QFrame {
+                    background-color: #fef3c7; 
+                    border: 2px solid #f59e0b; 
+                    border-radius: 8px;
+                }
+            """)
+            prev_layout = QVBoxLayout(prev_box)
+            prev_layout.setContentsMargins(15, 12, 15, 12)
+            
+            prev_title = QLabel("✓ Previous Value Column:")
+            prev_title.setStyleSheet("color: #b45309; font-weight: bold;")
+            prev_layout.addWidget(prev_title)
+            
+            self.lbl_selected_prev = QLabel("Click a column header to select")
+            self.lbl_selected_prev.setStyleSheet("color: #92400e; font-size: 14px;")
+            self.lbl_selected_prev.setWordWrap(True)
+            prev_layout.addWidget(self.lbl_selected_prev)
+            
+            selection_layout.addWidget(prev_box, 1)
         
         # Action buttons
         btn_box = QVBoxLayout()
@@ -448,7 +497,11 @@ class BrdViewerDialog(QDialog):
         col_index = logical_index - 1
         col_name = self.headers[col_index] if col_index < len(self.headers) else f"Column {col_index}"
         
-        if self.selection_mode == "perf":
+        if self.single_column_mode:
+            # Single column mode: always update perf col (used as target)
+            self.selected_perf_col = {"name": col_name, "index": col_index}
+            self.lbl_selected_perf.setText(f"✓ {col_name}")
+        elif self.selection_mode == "perf":
             self.selected_perf_col = {"name": col_name, "index": col_index}
             self.lbl_selected_perf.setText(f"✓ {col_name}")
             # Auto-switch to prev mode after selecting perf

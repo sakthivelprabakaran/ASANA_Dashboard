@@ -537,7 +537,9 @@ class ReportGeneratorTab(QWidget):
         # Import here to avoid circular imports
         from ui.brd_viewer_dialog import BrdViewerDialog
         
-        dialog = BrdViewerDialog(brd_data, self, initial_search="")
+        dialog = BrdViewerDialog(brd_data, self, initial_search="",
+                                 single_column_mode=True, 
+                                 single_column_label="🎯 Target Column (where to write Average)")
         
         if dialog.exec_():
             selection = dialog.get_selection()

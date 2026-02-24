@@ -1,20 +1,34 @@
 """
 BRD Writer - Writes Average values from Asana CSV back to BRD Excel file.
-Uses openpyxl to update specific cells in the BRD spreadsheet.
+Uses win32com (COM automation) for lossless Excel file editing on Windows.
+Falls back to openpyxl if win32com is not available.
 """
 
+import os
+import shutil
 import logging
-import openpyxl
 from typing import Dict, List, Any, Tuple
 from core.brd_matcher import BrdMatcher
 
 logger = logging.getLogger('AsanaGenerator.BrdWriter')
+
+# Try to import win32com for lossless Excel editing
+try:
+    import win32com.client
+    HAS_WIN32COM = True
+    logger.info("win32com available — using lossless Excel editing")
+except ImportError:
+    HAS_WIN32COM = False
+    logger.info("win32com not available — falling back to openpyxl")
 
 
 class BrdWriter:
     """
     Writes performance values (Average) from Asana CSV data back into the BRD Excel file.
     Matches scenarios using normalized name matching (same as BrdMatcher).
+    
+    Uses win32com (COM automation) for lossless file editing when available.
+    Falls back to openpyxl otherwise.
     """
 
     def __init__(self):
@@ -27,59 +41,38 @@ class BrdWriter:
                                dry_run: bool = False) -> Dict[str, Any]:
         """
         Write Average values from CSV tasks to the BRD Excel file.
-        
-        Args:
-            brd_file_path: Path to the BRD Excel file
-            sheet_name: Sheet name in the BRD file
-            target_col_index: Column index (0-based) where Average should be written
-            scenario_col_index: Column index (0-based) of the Performance Scenario column in BRD
-            csv_tasks: List of task dicts from CsvImporter (subtasks with Average values)
-            output_path: Output file path (if None, overwrites original)
-            dry_run: If True, don't actually write — just preview what would change
-            
-        Returns:
-            Dict with results:
-                'matched': List of matched scenarios with old/new values
-                'unmatched': List of CSV scenarios that couldn't be matched in BRD
-                'total_written': Number of cells written
-                'output_file': Path to the output file
         """
         if output_path is None:
             output_path = brd_file_path
-        
-        # Load workbook with openpyxl (NOT read_only — need write access)
-        # keep_links=True preserves external references
-        # We do NOT use data_only=True here — that would strip all formulas
-        wb = openpyxl.load_workbook(brd_file_path, keep_links=True)
-        ws = wb[sheet_name]
-        
-        # Build BRD scenario lookup from the sheet
-        # Read all rows and create normalized scenario → row mapping
-        brd_rows = []
-        for row_idx, row in enumerate(ws.iter_rows(min_row=1, values_only=False), start=1):
-            cells = [cell.value for cell in row]
-            brd_rows.append(cells)
-        
-        logger.info(f"BRD sheet '{sheet_name}': {len(brd_rows)} rows, "
-                    f"scenario_col={scenario_col_index}, target_col={target_col_index}")
-        
-        # Build normalized scenario → row index mapping (skip header rows)
+
+        if HAS_WIN32COM and not dry_run:
+            return self._write_with_win32com(
+                brd_file_path, sheet_name, target_col_index, scenario_col_index,
+                csv_tasks, output_path, dry_run
+            )
+        else:
+            return self._write_with_openpyxl(
+                brd_file_path, sheet_name, target_col_index, scenario_col_index,
+                csv_tasks, output_path, dry_run
+            )
+
+    def _build_scenario_lookup(self, brd_rows, scenario_col_index):
+        """Build normalized scenario → row index mapping from BRD data."""
         scenario_to_row = {}
-        start_row = 3  # Skip first 2 header rows (typical BRD format)
+        start_row = 3  # Skip first 2 header rows
         
         for row_idx in range(start_row - 1, len(brd_rows)):
             row = brd_rows[row_idx]
             if scenario_col_index < len(row):
                 scenario_raw = row[scenario_col_index]
                 normalized = self.matcher.normalize_scenario_name(scenario_raw)
-                if normalized:
-                    # Store first occurrence only (avoid duplicates)
-                    if normalized not in scenario_to_row:
-                        scenario_to_row[normalized] = row_idx + 1  # 1-based for openpyxl
+                if normalized and normalized not in scenario_to_row:
+                    scenario_to_row[normalized] = row_idx + 1  # 1-based
         
-        logger.info(f"Built BRD scenario lookup: {len(scenario_to_row)} unique scenarios")
-        
-        # Match CSV tasks to BRD rows and collect writes
+        return scenario_to_row
+
+    def _match_tasks(self, csv_tasks, scenario_to_row):
+        """Match CSV tasks to BRD rows by normalized scenario name."""
         matched = []
         unmatched = []
         
@@ -90,37 +83,22 @@ class BrdWriter:
             prev_value = task.get('Previous Value', '')
             parent = task.get('Parent task', '')
             
-            # Skip tasks without Average value
             if not average or average in ['', '-', '0']:
                 continue
             
-            # Normalize scenario name for matching
             normalized = self.matcher.normalize_scenario_name(scenario_name)
             
             if normalized in scenario_to_row:
                 row_num = scenario_to_row[normalized]
-                
-                # Get current value in target cell
-                # openpyxl is 1-based, column index needs +1
-                current_cell = ws.cell(row=row_num, column=target_col_index + 1)
-                old_value = current_cell.value
-                
                 matched.append({
                     'scenario': scenario_name,
                     'parent': parent,
                     'brd_row': row_num,
-                    'old_value': str(old_value) if old_value else '-',
+                    'old_value': '-',
                     'new_value': average,
                     'perf_brd': perf_brd,
                     'prev_value': prev_value,
                 })
-                
-                if not dry_run:
-                    # Try to write as number if possible
-                    try:
-                        current_cell.value = float(average)
-                    except (ValueError, TypeError):
-                        current_cell.value = average
             else:
                 unmatched.append({
                     'scenario': scenario_name,
@@ -129,19 +107,145 @@ class BrdWriter:
                     'normalized': normalized,
                 })
         
-        # Save workbook
+        return matched, unmatched
+
+    def _write_with_win32com(self, brd_file_path, sheet_name, target_col_index,
+                              scenario_col_index, csv_tasks, output_path, dry_run):
+        """Write using win32com COM automation — lossless Excel editing."""
+        import pythoncom
+        pythoncom.CoInitialize()
+        
+        excel = None
+        wb = None
+        
+        try:
+            # Copy source file to output path first
+            abs_src = os.path.abspath(brd_file_path)
+            abs_dst = os.path.abspath(output_path)
+            
+            if abs_src != abs_dst:
+                shutil.copy2(abs_src, abs_dst)
+            
+            # Open with Excel COM
+            excel = win32com.client.Dispatch("Excel.Application")
+            excel.Visible = False
+            excel.DisplayAlerts = False
+            
+            wb = excel.Workbooks.Open(abs_dst)
+            ws = wb.Sheets(sheet_name)
+            
+            # Read scenario column to build lookup
+            max_row = ws.UsedRange.Rows.Count
+            brd_rows = []
+            for r in range(1, max_row + 1):
+                scenario_val = ws.Cells(r, scenario_col_index + 1).Value
+                brd_rows.append([scenario_val])
+            
+            # Build lookup (using simple list with just scenario col)
+            scenario_to_row = {}
+            start_row = 3
+            for row_idx in range(start_row - 1, len(brd_rows)):
+                scenario_raw = brd_rows[row_idx][0]
+                normalized = self.matcher.normalize_scenario_name(scenario_raw)
+                if normalized and normalized not in scenario_to_row:
+                    scenario_to_row[normalized] = row_idx + 1
+            
+            logger.info(f"win32com: Built BRD lookup: {len(scenario_to_row)} scenarios")
+            
+            # Match tasks
+            matched, unmatched = self._match_tasks(csv_tasks, scenario_to_row)
+            
+            # Read old values and write new values
+            for m in matched:
+                row_num = m['brd_row']
+                col_num = target_col_index + 1  # 1-based
+                
+                old_val = ws.Cells(row_num, col_num).Value
+                m['old_value'] = str(old_val) if old_val is not None else '-'
+                
+                try:
+                    ws.Cells(row_num, col_num).Value = float(m['new_value'])
+                except (ValueError, TypeError):
+                    ws.Cells(row_num, col_num).Value = m['new_value']
+            
+            # Save
+            wb.Save()
+            logger.info(f"win32com: Saved {len(matched)} values to '{abs_dst}'")
+            
+            wb.Close(False)
+            wb = None
+            excel.Quit()
+            excel = None
+            
+            pythoncom.CoUninitialize()
+            
+            return {
+                'matched': matched,
+                'unmatched': unmatched,
+                'total_written': len(matched),
+                'total_skipped': len(unmatched),
+                'output_file': output_path,
+                'dry_run': False,
+            }
+            
+        except Exception as e:
+            logger.error(f"win32com write failed: {e}, falling back to openpyxl")
+            if wb:
+                try: wb.Close(False)
+                except: pass
+            if excel:
+                try: excel.Quit()
+                except: pass
+            try: pythoncom.CoUninitialize()
+            except: pass
+            
+            # Fallback to openpyxl
+            return self._write_with_openpyxl(
+                brd_file_path, sheet_name, target_col_index, scenario_col_index,
+                csv_tasks, output_path, dry_run
+            )
+
+    def _write_with_openpyxl(self, brd_file_path, sheet_name, target_col_index,
+                              scenario_col_index, csv_tasks, output_path, dry_run):
+        """Write using openpyxl — may cause Excel recovery warning on complex files."""
+        import openpyxl
+        
+        wb = openpyxl.load_workbook(brd_file_path, keep_links=True)
+        ws = wb[sheet_name]
+        
+        # Read all rows
+        brd_rows = []
+        for row in ws.iter_rows(min_row=1, values_only=False):
+            brd_rows.append([cell.value for cell in row])
+        
+        logger.info(f"openpyxl: BRD sheet '{sheet_name}': {len(brd_rows)} rows")
+        
+        # Build lookup
+        scenario_to_row = self._build_scenario_lookup(brd_rows, scenario_col_index)
+        logger.info(f"openpyxl: Built BRD lookup: {len(scenario_to_row)} scenarios")
+        
+        # Match tasks
+        matched, unmatched = self._match_tasks(csv_tasks, scenario_to_row)
+        
+        # Read old values and write new values
+        for m in matched:
+            row_num = m['brd_row']
+            cell = ws.cell(row=row_num, column=target_col_index + 1)
+            m['old_value'] = str(cell.value) if cell.value is not None else '-'
+            
+            if not dry_run:
+                try:
+                    cell.value = float(m['new_value'])
+                except (ValueError, TypeError):
+                    cell.value = m['new_value']
+        
         if not dry_run and matched:
-            try:
-                wb.save(output_path)
-                logger.info(f"BRD file saved: {len(matched)} values written to '{output_path}'")
-            except Exception as save_err:
-                logger.error(f"Failed to save BRD file: {save_err}")
-                wb.close()
-                raise Exception(f"Failed to save: {save_err}")
+            wb.save(output_path)
+            logger.info(f"openpyxl: Saved {len(matched)} values to '{output_path}'")
         
         wb.close()
         
-        result = {
+        return {
             'matched': matched,
             'unmatched': unmatched,
             'total_written': len(matched) if not dry_run else 0,
@@ -149,8 +253,3 @@ class BrdWriter:
             'output_file': output_path,
             'dry_run': dry_run,
         }
-        
-        logger.info(f"Write results: {len(matched)} matched, {len(unmatched)} unmatched, "
-                    f"dry_run={dry_run}")
-        
-        return result

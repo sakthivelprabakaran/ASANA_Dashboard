@@ -39,8 +39,23 @@ asana_export*.csv
 *.backup
 *.bak
 
+# Debug files
+debug_*.py
+debug_*.txt
+
+# Sample/test data files
+*.csv
+!asana_generator_app/**/*.csv
+
+# BRD test data (large Excel files)
+Juno_*.xlsx
+Barolo*.csv
+
 # Deprecated generator scripts (kept locally, not tracked)
 asana_csv_generator.py
 asana_csv_generator_v2.py
 asana_csv_generator_v3.py
 asana_csv_generator_v4.py
+
+# Standalone web version (deprecated in favor of desktop app)
+asana_generator_web.html

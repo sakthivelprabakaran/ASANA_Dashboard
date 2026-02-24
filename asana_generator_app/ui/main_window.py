@@ -12,13 +12,14 @@ from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QH
                              QLabel, QLineEdit, QPushButton, QFileDialog, 
                              QComboBox, QTableView, QHeaderView, QMessageBox, QGroupBox, 
                              QScrollArea, QSplitter, QFrame, QListWidget, QListWidgetItem,
-                             QTextEdit, QAbstractItemView, QMenu, QAction)
+                             QTextEdit, QAbstractItemView, QMenu, QAction, QTabWidget)
 from PyQt5.QtCore import Qt, QAbstractTableModel
 from PyQt5.QtGui import QColor, QFont
 
 from core.data_loader import DataLoader
 from core.brd_matcher import BrdMatcher
 from ui.brd_viewer_dialog import BrdViewerDialog
+from ui.report_generator_tab import ReportGeneratorTab
 
 logger = logging.getLogger('AsanaGenerator.MainWindow')
 
@@ -151,11 +152,45 @@ class MainWindow(QMainWindow):
         
         main_layout.addWidget(header)
 
-        # === MAIN CONTENT ===
+        # === TAB WIDGET ===
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet("""
+            QTabWidget::pane {
+                border: none;
+                background-color: #ffffff;
+            }
+            QTabBar::tab {
+                background-color: #f1f5f9;
+                color: #64748b;
+                padding: 10px 24px;
+                margin-right: 2px;
+                font-weight: bold;
+                font-size: 13px;
+                border: none;
+                border-bottom: 3px solid transparent;
+            }
+            QTabBar::tab:selected {
+                background-color: #ffffff;
+                color: #3b82f6;
+                border-bottom: 3px solid #3b82f6;
+            }
+            QTabBar::tab:hover {
+                background-color: #e2e8f0;
+                color: #1e293b;
+            }
+        """)
+        main_layout.addWidget(self.tab_widget)
+
+        # === TAB 1: TASK CREATOR ===
+        task_creator_tab = QWidget()
+        task_creator_layout = QVBoxLayout(task_creator_tab)
+        task_creator_layout.setContentsMargins(0, 0, 0, 0)
+        task_creator_layout.setSpacing(0)
+        
         splitter = QSplitter(Qt.Horizontal)
         splitter.setHandleWidth(1)
         splitter.setStyleSheet("QSplitter::handle { background-color: #e2e8f0; }")
-        main_layout.addWidget(splitter)
+        task_creator_layout.addWidget(splitter)
 
         # --- LEFT PANEL (Compact Sidebar) ---
         left_scroll = QScrollArea()
@@ -522,6 +557,13 @@ class MainWindow(QMainWindow):
 
         # Splitter sizes
         splitter.setSizes([320, 1080])
+        
+        # Add Tab 1
+        self.tab_widget.addTab(task_creator_tab, "⚡ Task Creator")
+        
+        # === TAB 2: REPORT GENERATOR ===
+        self.report_tab = ReportGeneratorTab(parent_window=self)
+        self.tab_widget.addTab(self.report_tab, "📊 Report Generator")
         
         # Connect signals after all UI elements are created
         self.combo_template_sheet.currentIndexChanged.connect(self._on_template_sheet_changed)

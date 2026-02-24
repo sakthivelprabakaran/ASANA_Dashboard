@@ -565,7 +565,7 @@ class ReportGeneratorTab(QWidget):
     # ====================
     
     def preview_write(self):
-        """Preview what would be written to BRD (dry run)."""
+        """Preview what would be written to BRD (dry run) — shows full table."""
         result = self._execute_write(dry_run=True)
         if result is None:
             return
@@ -573,27 +573,81 @@ class ReportGeneratorTab(QWidget):
         matched = result['matched']
         unmatched = result['unmatched']
         
-        if not matched:
-            QMessageBox.information(self, "Preview", 
-                f"No scenarios matched between CSV and BRD.\n\n"
-                f"{len(unmatched)} scenarios could not be found in BRD.")
+        if not matched and not unmatched:
+            QMessageBox.information(self, "Preview", "No tasks with Average values to write.")
             return
         
-        # Show preview in a message
-        preview_lines = [f"✅ {len(matched)} scenarios will be updated:"]
-        for m in matched[:20]:
-            preview_lines.append(f"  • {m['scenario'][:50]}: {m['old_value']} → {m['new_value']}")
-        if len(matched) > 20:
-            preview_lines.append(f"  ... and {len(matched) - 20} more")
+        # Show a proper preview dialog with table
+        from PyQt5.QtWidgets import QDialog, QTableWidget, QTableWidgetItem
         
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"📋 Write Preview — {len(matched)} matched, {len(unmatched)} unmatched")
+        dialog.setMinimumSize(1000, 600)
+        dlg_layout = QVBoxLayout(dialog)
+        
+        # Summary
+        summary = QLabel(f"✅ <b>{len(matched)}</b> scenarios will be updated  |  "
+                        f"⚠️ <b>{len(unmatched)}</b> unmatched (skipped)")
+        summary.setStyleSheet("font-size: 14px; padding: 8px; background: #f1f5f9; border-radius: 6px;")
+        dlg_layout.addWidget(summary)
+        
+        # Matched table
+        if matched:
+            dlg_layout.addWidget(QLabel(f"<b>✅ Matched ({len(matched)}):</b>"))
+            
+            match_table = QTableWidget(len(matched), 5)
+            match_table.setHorizontalHeaderLabels(["Scenario", "Parent Task", "Old Value", "New Value (Average)", "BRD Row"])
+            match_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            match_table.setAlternatingRowColors(True)
+            match_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            match_table.setStyleSheet("QTableWidget { gridline-color: #e2e8f0; } "
+                                     "QTableWidget::item { padding: 4px; }")
+            
+            for i, m in enumerate(matched):
+                match_table.setItem(i, 0, QTableWidgetItem(m['scenario']))
+                match_table.setItem(i, 1, QTableWidgetItem(m.get('parent', '')))
+                
+                old_item = QTableWidgetItem(m['old_value'])
+                old_item.setBackground(QColor('#fef3c7'))
+                match_table.setItem(i, 2, old_item)
+                
+                new_item = QTableWidgetItem(m['new_value'])
+                new_item.setBackground(QColor('#ecfdf5'))
+                match_table.setItem(i, 3, new_item)
+                
+                match_table.setItem(i, 4, QTableWidgetItem(str(m.get('brd_row', ''))))
+            
+            match_table.resizeColumnsToContents()
+            dlg_layout.addWidget(match_table, 1)
+        
+        # Unmatched table
         if unmatched:
-            preview_lines.append(f"\n⚠️ {len(unmatched)} scenarios NOT matched:")
-            for u in unmatched[:10]:
-                preview_lines.append(f"  • {u['scenario'][:50]}")
-            if len(unmatched) > 10:
-                preview_lines.append(f"  ... and {len(unmatched) - 10} more")
+            dlg_layout.addWidget(QLabel(f"<b>⚠️ Unmatched ({len(unmatched)}) — these will be skipped:</b>"))
+            
+            unmatch_table = QTableWidget(len(unmatched), 3)
+            unmatch_table.setHorizontalHeaderLabels(["Scenario", "Parent Task", "Average"])
+            unmatch_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+            unmatch_table.setAlternatingRowColors(True)
+            unmatch_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+            unmatch_table.setMaximumHeight(200)
+            unmatch_table.setStyleSheet("QTableWidget { gridline-color: #fecaca; } "
+                                       "QTableWidget::item { padding: 4px; background: #fef2f2; }")
+            
+            for i, u in enumerate(unmatched):
+                unmatch_table.setItem(i, 0, QTableWidgetItem(u['scenario']))
+                unmatch_table.setItem(i, 1, QTableWidgetItem(u.get('parent', '')))
+                unmatch_table.setItem(i, 2, QTableWidgetItem(u.get('average', '')))
+            
+            unmatch_table.resizeColumnsToContents()
+            dlg_layout.addWidget(unmatch_table)
         
-        QMessageBox.information(self, "Write Preview", "\n".join(preview_lines))
+        # Close button
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dialog.accept)
+        btn_close.setStyleSheet("padding: 8px 24px; background: #3b82f6; color: white; border-radius: 6px; font-weight: bold;")
+        dlg_layout.addWidget(btn_close, alignment=Qt.AlignRight)
+        
+        dialog.exec_()
     
     def write_to_brd(self):
         """Write Average values to BRD file."""

@@ -45,6 +45,8 @@ class BrdWriter:
         if output_path is None:
             output_path = brd_file_path
 
+        logger.info(f"BRD Writer: HAS_WIN32COM={HAS_WIN32COM}, dry_run={dry_run}")
+        
         if HAS_WIN32COM and not dry_run:
             return self._write_with_win32com(
                 brd_file_path, sheet_name, target_col_index, scenario_col_index,

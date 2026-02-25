@@ -468,6 +468,10 @@ class ReportGeneratorTab(QWidget):
         self.lbl_na_count.setStyleSheet("color: #64748b; background: #e2e8f0; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 11px;")
         summary_bar_layout.addWidget(self.lbl_na_count)
         
+        self.lbl_total_count = QLabel("📊 Total: 0")
+        self.lbl_total_count.setStyleSheet("color: #FFFFFF; background: #475569; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        summary_bar_layout.addWidget(self.lbl_total_count)
+        
         self.lbl_pass_fail = QLabel("")
         self.lbl_pass_fail.setStyleSheet("color: #475569; font-size: 11px; margin-left: 8px;")
         summary_bar_layout.addWidget(self.lbl_pass_fail)
@@ -684,6 +688,7 @@ class ReportGeneratorTab(QWidget):
         self.lbl_yellow_count.setText(f"🟡 YELLOW: {yellow}")
         self.lbl_red_count.setText(f"🔴 RED: {red}")
         self.lbl_na_count.setText(f"⬜ NA: {na}")
+        self.lbl_total_count.setText(f"📊 Total: {green + yellow + red + na}")
         
         if total_applicable > 0:
             pass_pct = (pass_count / total_applicable) * 100

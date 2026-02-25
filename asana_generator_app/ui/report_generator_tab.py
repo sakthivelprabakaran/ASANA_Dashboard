@@ -74,67 +74,67 @@ class CsvTableModel(QAbstractTableModel):
             if col_key == 'Average' and val and val not in ['', '-', '0']:
                 return QColor('#ecfdf5')  # Light green
             
-            # Color-coded deviation columns (GREEN/YELLOW/RED)
+            # Color-coded deviation columns — solid GREEN/YELLOW/RED fill
             if col_key == 'Deviation_BRD':
                 color = row_data.get('_brd_color', '')
                 if color == 'green':
-                    return QColor('#dcfce7')  # Green bg
+                    return QColor('#00B050')  # Solid green (Excel green)
                 elif color == 'yellow':
-                    return QColor('#fef9c3')  # Yellow bg
+                    return QColor('#FFFF00')  # Solid yellow (Excel yellow)
                 elif color == 'red':
-                    return QColor('#fee2e2')  # Red bg
+                    return QColor('#FF0000')  # Solid red (Excel red)
             
             if col_key == 'Deviation_Prev':
                 color = row_data.get('_prev_color', '')
                 if color == 'green':
-                    return QColor('#dcfce7')
+                    return QColor('#00B050')
                 elif color == 'yellow':
-                    return QColor('#fef9c3')
+                    return QColor('#FFFF00')
                 elif color == 'red':
-                    return QColor('#fee2e2')
+                    return QColor('#FF0000')
             
-            # BRD Status — PASS (green) / FAIL (red)
+            # BRD Status — solid fill
             if col_key == 'BRD Status':
                 val_upper = str(val).upper()
                 if val_upper == 'PASS':
-                    return QColor('#dcfce7')
+                    return QColor('#00B050')  # Solid green
                 elif val_upper == 'FAIL':
-                    return QColor('#fee2e2')
+                    return QColor('#FF0000')  # Solid red
             
-            # Previous Status — PASS (green) / FAIL (red)
+            # Previous Status — solid fill
             if col_key == 'Previous Status':
                 val_upper = str(val).upper()
                 if val_upper == 'PASS':
-                    return QColor('#dcfce7')
+                    return QColor('#00B050')
                 elif val_upper == 'FAIL':
-                    return QColor('#fee2e2')
+                    return QColor('#FF0000')
         
         if role == Qt.ForegroundRole:
-            # Bold colors for status columns
+            # White text on solid color backgrounds for readability
             if col_key == 'BRD Status':
                 val_upper = str(val).upper()
                 if val_upper == 'PASS':
-                    return QColor('#16a34a')  # Green text
+                    return QColor('#FFFFFF')  # White text on green
                 elif val_upper == 'FAIL':
-                    return QColor('#dc2626')  # Red text
+                    return QColor('#FFFFFF')  # White text on red
             
             if col_key == 'Previous Status':
                 val_upper = str(val).upper()
                 if val_upper == 'PASS':
-                    return QColor('#16a34a')
+                    return QColor('#FFFFFF')
                 elif val_upper == 'FAIL':
-                    return QColor('#dc2626')
+                    return QColor('#FFFFFF')
             
-            # Color text for deviation values
+            # White text on solid deviation backgrounds
             if col_key in ('Deviation_BRD', 'Deviation_Prev'):
                 color_key = '_brd_color' if col_key == 'Deviation_BRD' else '_prev_color'
                 color = row_data.get(color_key, '')
                 if color == 'green':
-                    return QColor('#16a34a')
+                    return QColor('#FFFFFF')  # White on green
                 elif color == 'yellow':
-                    return QColor('#ca8a04')
+                    return QColor('#000000')  # Black on yellow (better contrast)
                 elif color == 'red':
-                    return QColor('#dc2626')
+                    return QColor('#FFFFFF')  # White on red
         
         return None
 

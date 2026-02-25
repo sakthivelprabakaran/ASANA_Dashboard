@@ -7,14 +7,80 @@ import logging
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QFileDialog, QComboBox, QLineEdit, QTableView, QHeaderView,
                              QMessageBox, QFrame, QScrollArea, QSplitter, QAbstractItemView)
-from PyQt5.QtCore import Qt, QAbstractTableModel, QSortFilterProxyModel, QTimer
-from PyQt5.QtGui import QColor
+from PyQt5.QtCore import Qt, QAbstractTableModel, QSortFilterProxyModel, QTimer, QModelIndex
+from PyQt5.QtGui import QColor, QPainter
+from PyQt5.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
 
 from core.csv_importer import CsvImporter
 from core.brd_writer import BrdWriter
 from core.data_loader import DataLoader
 
 logger = logging.getLogger('AsanaGenerator.ReportGenerator')
+
+
+class CsvCellDelegate(QStyledItemDelegate):
+    """Custom delegate to paint cell backgrounds for colored columns (like BRD Viewer)."""
+    
+    # Column indices that need special coloring
+    COLOR_COLUMNS = {'BRD Status', 'Previous Status', 'Deviation_BRD', 'Deviation_Prev'}
+    
+    def __init__(self, model, parent=None):
+        super().__init__(parent)
+        self._model = model
+    
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: QModelIndex):
+        """Custom paint to force background colors even when selected."""
+        if not index.isValid() or index.column() >= len(self._model.DISPLAY_COLUMNS):
+            super().paint(painter, option, index)
+            return
+        
+        col_key = self._model.DISPLAY_COLUMNS[index.column()]
+        
+        if col_key in self.COLOR_COLUMNS and index.row() < len(self._model._data):
+            row_data = self._model._data[index.row()]
+            val = row_data.get(col_key, '')
+            
+            bg_color = None
+            fg_color = None
+            
+            # Deviation columns
+            if col_key in ('Deviation_BRD', 'Deviation_Prev'):
+                color_key = '_brd_color' if col_key == 'Deviation_BRD' else '_prev_color'
+                color = row_data.get(color_key, '')
+                if color == 'green':
+                    bg_color = QColor('#00B050')
+                    fg_color = QColor('#FFFFFF')
+                elif color == 'yellow':
+                    bg_color = QColor('#FFFF00')
+                    fg_color = QColor('#000000')
+                elif color == 'red':
+                    bg_color = QColor('#FF0000')
+                    fg_color = QColor('#FFFFFF')
+            
+            # Status columns
+            elif col_key in ('BRD Status', 'Previous Status'):
+                val_upper = str(val).upper()
+                if val_upper == 'PASS':
+                    bg_color = QColor('#00B050')
+                    fg_color = QColor('#FFFFFF')
+                elif val_upper == 'FAIL':
+                    bg_color = QColor('#FF0000')
+                    fg_color = QColor('#FFFFFF')
+            
+            if bg_color:
+                # Force paint background
+                painter.fillRect(option.rect, bg_color)
+                
+                # Draw text
+                if fg_color:
+                    painter.setPen(fg_color)
+                text = str(val)[:100] if val else ''
+                painter.drawText(option.rect.adjusted(4, 0, -4, 0), 
+                               Qt.AlignVCenter | Qt.AlignLeft, text)
+                return
+        
+        # Default painting for non-colored cells
+        super().paint(painter, option, index)
 
 
 class CsvTableModel(QAbstractTableModel):
@@ -409,6 +475,10 @@ class ReportGeneratorTab(QWidget):
         
         self.table_model = CsvTableModel()
         self.table.setModel(self.table_model)
+        
+        # Install custom delegate for colored cells (same approach as BRD Viewer)
+        self.cell_delegate = CsvCellDelegate(self.table_model, self.table)
+        self.table.setItemDelegate(self.cell_delegate)
         right_layout.addWidget(self.table, 1)
         
         # Status bar

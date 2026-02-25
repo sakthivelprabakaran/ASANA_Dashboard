@@ -287,20 +287,35 @@ class CsvImporter:
 
     @staticmethod
     def _get_color(deviation: float) -> str:
-        """Get color based on absolute deviation value."""
-        abs_dev = abs(deviation)
-        if abs_dev < 0.005:
+        """
+        Get color based on deviation value.
+        Negative deviation = current is BETTER (faster) than baseline = always GREEN
+        Positive deviation = current is WORSE (slower) than baseline = check thresholds
+        """
+        if deviation <= 0:
+            # Negative or zero = better or same as baseline = GREEN
             return 'green'
-        elif abs_dev < 0.1:
+        elif deviation < 0.005:
+            # Very small positive deviation (< 0.5%) = GREEN
+            return 'green'
+        elif deviation < 0.1:
+            # Small positive deviation (0.5% to 10%) = YELLOW
             return 'yellow'
         else:
+            # Large positive deviation (>= 10%) = RED
             return 'red'
 
     @staticmethod
     def _get_status(deviation: float) -> str:
-        """Get PASS/FAIL status based on deviation threshold."""
-        abs_dev = abs(deviation)
-        if abs_dev < 0.1:
+        """
+        Get PASS/FAIL status based on deviation.
+        Negative = PASS (better than baseline)
+        Positive < 10% = PASS (acceptable)
+        Positive >= 10% = FAIL (regression)
+        """
+        if deviation <= 0:
+            return 'PASS'
+        elif deviation < 0.1:
             return 'PASS'
         else:
             return 'FAIL'

@@ -220,6 +220,92 @@ class CsvImporter:
         return filtered
 
     @staticmethod
+    def calculate_deviations(tasks: List[Dict]) -> List[Dict]:
+        """
+        Calculate deviation percentages and status for each task.
+        
+        Dev% BRD = (Average - Perf_BRD) / Perf_BRD
+        Dev% Prev = (Average - Previous Value) / Previous Value
+        
+        Status thresholds (based on absolute deviation):
+        - GREEN: < 0.005 (0.5%)
+        - YELLOW: 0 to 0.1 (0% to 10%)
+        - RED: >= 0.1 (10%+)
+        
+        PASS = GREEN or YELLOW (< 10%)
+        FAIL = RED (>= 10%)
+        """
+        for task in tasks:
+            average_str = task.get('Average', '')
+            perf_brd_str = task.get('Perf_BRD', '')
+            prev_value_str = task.get('Previous Value', '')
+            
+            # Parse numeric values
+            average = CsvImporter._parse_number(average_str)
+            perf_brd = CsvImporter._parse_number(perf_brd_str)
+            prev_value = CsvImporter._parse_number(prev_value_str)
+            
+            # Calculate Dev% BRD
+            if average is not None and perf_brd is not None and perf_brd != 0:
+                dev_brd = (average - perf_brd) / perf_brd
+                task['Deviation_BRD'] = f"{dev_brd:.4f}"
+                task['_dev_brd_value'] = dev_brd
+                task['BRD Status'] = CsvImporter._get_status(dev_brd)
+                task['_brd_color'] = CsvImporter._get_color(dev_brd)
+            else:
+                task['Deviation_BRD'] = task.get('Deviation_BRD', '')
+                task['_dev_brd_value'] = None
+                task['_brd_color'] = ''
+                if not task.get('BRD Status'):
+                    task['BRD Status'] = ''
+            
+            # Calculate Dev% Prev
+            if average is not None and prev_value is not None and prev_value != 0:
+                dev_prev = (average - prev_value) / prev_value
+                task['Deviation_Prev'] = f"{dev_prev:.4f}"
+                task['_dev_prev_value'] = dev_prev
+                task['Previous Status'] = CsvImporter._get_status(dev_prev)
+                task['_prev_color'] = CsvImporter._get_color(dev_prev)
+            else:
+                task['Deviation_Prev'] = task.get('Deviation_Prev', '')
+                task['_dev_prev_value'] = None
+                task['_prev_color'] = ''
+                if not task.get('Previous Status'):
+                    task['Previous Status'] = ''
+        
+        return tasks
+
+    @staticmethod
+    def _parse_number(val_str: str) -> Optional[float]:
+        """Parse a string to float, returning None if not numeric."""
+        if not val_str or val_str in ['', '-', '0', 'NA', 'N/A', 'nan', 'None', 'Blocked']:
+            return None
+        try:
+            return float(val_str.replace(',', ''))
+        except (ValueError, TypeError):
+            return None
+
+    @staticmethod
+    def _get_color(deviation: float) -> str:
+        """Get color based on absolute deviation value."""
+        abs_dev = abs(deviation)
+        if abs_dev < 0.005:
+            return 'green'
+        elif abs_dev < 0.1:
+            return 'yellow'
+        else:
+            return 'red'
+
+    @staticmethod
+    def _get_status(deviation: float) -> str:
+        """Get PASS/FAIL status based on deviation threshold."""
+        abs_dev = abs(deviation)
+        if abs_dev < 0.1:
+            return 'PASS'
+        else:
+            return 'FAIL'
+
+    @staticmethod
     def enrich_subtasks_with_parent_info(tasks: List[Dict]) -> List[Dict]:
         """
         Enrich subtasks with their parent task's section and project info.

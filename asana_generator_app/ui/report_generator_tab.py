@@ -73,15 +73,68 @@ class CsvTableModel(QAbstractTableModel):
             # Highlight Average column with values
             if col_key == 'Average' and val and val not in ['', '-', '0']:
                 return QColor('#ecfdf5')  # Light green
-            # Highlight BRD Status
-            if col_key == 'BRD Status':
-                val_lower = str(val).lower()
-                if 'red' in val_lower:
+            
+            # Color-coded deviation columns (GREEN/YELLOW/RED)
+            if col_key == 'Deviation_BRD':
+                color = row_data.get('_brd_color', '')
+                if color == 'green':
+                    return QColor('#dcfce7')  # Green bg
+                elif color == 'yellow':
+                    return QColor('#fef9c3')  # Yellow bg
+                elif color == 'red':
+                    return QColor('#fee2e2')  # Red bg
+            
+            if col_key == 'Deviation_Prev':
+                color = row_data.get('_prev_color', '')
+                if color == 'green':
+                    return QColor('#dcfce7')
+                elif color == 'yellow':
+                    return QColor('#fef9c3')
+                elif color == 'red':
                     return QColor('#fee2e2')
-                elif 'yellow' in val_lower:
-                    return QColor('#fef3c7')
-                elif 'green' in val_lower:
-                    return QColor('#ecfdf5')
+            
+            # BRD Status — PASS (green) / FAIL (red)
+            if col_key == 'BRD Status':
+                val_upper = str(val).upper()
+                if val_upper == 'PASS':
+                    return QColor('#dcfce7')
+                elif val_upper == 'FAIL':
+                    return QColor('#fee2e2')
+            
+            # Previous Status — PASS (green) / FAIL (red)
+            if col_key == 'Previous Status':
+                val_upper = str(val).upper()
+                if val_upper == 'PASS':
+                    return QColor('#dcfce7')
+                elif val_upper == 'FAIL':
+                    return QColor('#fee2e2')
+        
+        if role == Qt.ForegroundRole:
+            # Bold colors for status columns
+            if col_key == 'BRD Status':
+                val_upper = str(val).upper()
+                if val_upper == 'PASS':
+                    return QColor('#16a34a')  # Green text
+                elif val_upper == 'FAIL':
+                    return QColor('#dc2626')  # Red text
+            
+            if col_key == 'Previous Status':
+                val_upper = str(val).upper()
+                if val_upper == 'PASS':
+                    return QColor('#16a34a')
+                elif val_upper == 'FAIL':
+                    return QColor('#dc2626')
+            
+            # Color text for deviation values
+            if col_key in ('Deviation_BRD', 'Deviation_Prev'):
+                color_key = '_brd_color' if col_key == 'Deviation_BRD' else '_prev_color'
+                color = row_data.get(color_key, '')
+                if color == 'green':
+                    return QColor('#16a34a')
+                elif color == 'yellow':
+                    return QColor('#ca8a04')
+                elif color == 'red':
+                    return QColor('#dc2626')
         
         return None
 
@@ -384,6 +437,11 @@ class ReportGeneratorTab(QWidget):
             
             # Enrich subtasks with parent info
             self.csv_data['tasks'] = CsvImporter.enrich_subtasks_with_parent_info(
+                self.csv_data['tasks']
+            )
+            
+            # Auto-calculate deviations and status
+            self.csv_data['tasks'] = CsvImporter.calculate_deviations(
                 self.csv_data['tasks']
             )
             

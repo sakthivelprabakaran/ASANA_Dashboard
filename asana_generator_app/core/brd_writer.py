@@ -74,26 +74,7 @@ class BrdWriter:
                 old_val = brd_rows[row_idx][target_col_index]
                 m['old_value'] = str(old_val) if old_val is not None else '-'
         
-        # Deduplicate: if multiple CSV tasks map to the same BRD row, keep the first one
-        seen_rows = {}
-        deduped_matched = []
-        duplicates = 0
-        for m in matched:
-            brd_row = m['brd_row']
-            if brd_row not in seen_rows:
-                seen_rows[brd_row] = m
-                deduped_matched.append(m)
-            else:
-                duplicates += 1
-                logger.info(f"Duplicate: '{m['scenario']}' also maps to BRD row {brd_row} "
-                           f"(keeping first: '{seen_rows[brd_row]['scenario']}')")
-        
-        if duplicates > 0:
-            logger.info(f"Deduplication: {duplicates} duplicate BRD row mappings removed, "
-                       f"{len(deduped_matched)} unique rows to write")
-        
-        matched = deduped_matched
-        logger.info(f"Matching results: {len(matched)} matched (unique BRD rows), {len(unmatched)} unmatched")
+        logger.info(f"Matching results: {len(matched)} matched, {len(unmatched)} unmatched")
         
         # STEP 2: If dry run, return results without writing
         if dry_run:
@@ -119,8 +100,11 @@ class BrdWriter:
             )
 
     def _build_scenario_lookup(self, brd_rows, scenario_col_index):
-        """Build normalized scenario → row index mapping from BRD data."""
-        scenario_to_row = {}
+        """
+        Build normalized scenario → list of row indices mapping from BRD data.
+        Supports multiple BRD rows with the same scenario name (matched in order).
+        """
+        scenario_to_rows = {}  # scenario → [row1, row2, ...] (multiple occurrences)
         start_row = 3  # Skip first 2 header rows
         
         for row_idx in range(start_row - 1, len(brd_rows)):
@@ -128,15 +112,23 @@ class BrdWriter:
             if scenario_col_index < len(row):
                 scenario_raw = row[scenario_col_index]
                 normalized = self.matcher.normalize_scenario_name(scenario_raw)
-                if normalized and normalized not in scenario_to_row:
-                    scenario_to_row[normalized] = row_idx + 1  # 1-based
+                if normalized:
+                    if normalized not in scenario_to_rows:
+                        scenario_to_rows[normalized] = []
+                    scenario_to_rows[normalized].append(row_idx + 1)  # 1-based
         
-        return scenario_to_row
+        return scenario_to_rows
 
-    def _match_tasks(self, csv_tasks, scenario_to_row):
-        """Match CSV tasks to BRD rows by normalized scenario name."""
+    def _match_tasks(self, csv_tasks, scenario_to_rows):
+        """
+        Match CSV tasks to BRD rows by normalized scenario name.
+        Supports multiple occurrences: 1st CSV match → 1st BRD row, 2nd → 2nd, etc.
+        """
         matched = []
         unmatched = []
+        
+        # Track how many times each scenario has been matched (for sequential matching)
+        scenario_match_count = {}
         
         for task in csv_tasks:
             scenario_name = task.get('Name', '')
@@ -150,17 +142,36 @@ class BrdWriter:
             
             normalized = self.matcher.normalize_scenario_name(scenario_name)
             
-            if normalized in scenario_to_row:
-                row_num = scenario_to_row[normalized]
-                matched.append({
-                    'scenario': scenario_name,
-                    'parent': parent,
-                    'brd_row': row_num,
-                    'old_value': '-',
-                    'new_value': average,
-                    'perf_brd': perf_brd,
-                    'prev_value': prev_value,
-                })
+            if normalized in scenario_to_rows:
+                brd_rows_list = scenario_to_rows[normalized]
+                
+                # Get the occurrence count for this scenario
+                occurrence = scenario_match_count.get(normalized, 0)
+                
+                if occurrence < len(brd_rows_list):
+                    # Match to the Nth BRD row for this scenario
+                    row_num = brd_rows_list[occurrence]
+                    scenario_match_count[normalized] = occurrence + 1
+                    
+                    matched.append({
+                        'scenario': scenario_name,
+                        'parent': parent,
+                        'brd_row': row_num,
+                        'old_value': '-',
+                        'new_value': average,
+                        'perf_brd': perf_brd,
+                        'prev_value': prev_value,
+                    })
+                else:
+                    # More CSV occurrences than BRD rows — unmatched
+                    logger.warning(f"Scenario '{scenario_name}' has more CSV occurrences "
+                                 f"({occurrence + 1}) than BRD rows ({len(brd_rows_list)})")
+                    unmatched.append({
+                        'scenario': scenario_name,
+                        'parent': parent,
+                        'average': average,
+                        'normalized': normalized,
+                    })
             else:
                 unmatched.append({
                     'scenario': scenario_name,

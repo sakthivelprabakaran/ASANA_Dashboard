@@ -224,7 +224,14 @@ class BrdWriter:
             
             wb.Close(False)
             wb = None
-            excel.Quit()
+            
+            # Only quit Excel if no other workbooks are open
+            # This prevents closing user's existing Excel files
+            if excel.Workbooks.Count == 0:
+                excel.Quit()
+                logger.info("win32com: No other workbooks open, quit Excel")
+            else:
+                logger.info(f"win32com: {excel.Workbooks.Count} other workbooks still open, keeping Excel running")
             excel = None
             pythoncom.CoUninitialize()
             

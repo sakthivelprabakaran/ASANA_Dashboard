@@ -74,7 +74,26 @@ class BrdWriter:
                 old_val = brd_rows[row_idx][target_col_index]
                 m['old_value'] = str(old_val) if old_val is not None else '-'
         
-        logger.info(f"Matching results: {len(matched)} matched, {len(unmatched)} unmatched")
+        # Deduplicate: if multiple CSV tasks map to the same BRD row, keep the first one
+        seen_rows = {}
+        deduped_matched = []
+        duplicates = 0
+        for m in matched:
+            brd_row = m['brd_row']
+            if brd_row not in seen_rows:
+                seen_rows[brd_row] = m
+                deduped_matched.append(m)
+            else:
+                duplicates += 1
+                logger.info(f"Duplicate: '{m['scenario']}' also maps to BRD row {brd_row} "
+                           f"(keeping first: '{seen_rows[brd_row]['scenario']}')")
+        
+        if duplicates > 0:
+            logger.info(f"Deduplication: {duplicates} duplicate BRD row mappings removed, "
+                       f"{len(deduped_matched)} unique rows to write")
+        
+        matched = deduped_matched
+        logger.info(f"Matching results: {len(matched)} matched (unique BRD rows), {len(unmatched)} unmatched")
         
         # STEP 2: If dry run, return results without writing
         if dry_run:

@@ -446,6 +446,36 @@ class ReportGeneratorTab(QWidget):
         header_row.addWidget(self.lbl_filter_count)
         right_layout.addLayout(header_row)
         
+        # Status summary bar (GREEN/YELLOW/RED/NA counts)
+        self.summary_bar = QWidget()
+        summary_bar_layout = QHBoxLayout(self.summary_bar)
+        summary_bar_layout.setContentsMargins(0, 0, 0, 0)
+        summary_bar_layout.setSpacing(12)
+        
+        self.lbl_green_count = QLabel("🟢 GREEN: 0")
+        self.lbl_green_count.setStyleSheet("color: #FFFFFF; background: #00B050; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        summary_bar_layout.addWidget(self.lbl_green_count)
+        
+        self.lbl_yellow_count = QLabel("🟡 YELLOW: 0")
+        self.lbl_yellow_count.setStyleSheet("color: #000000; background: #FFFF00; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        summary_bar_layout.addWidget(self.lbl_yellow_count)
+        
+        self.lbl_red_count = QLabel("🔴 RED: 0")
+        self.lbl_red_count.setStyleSheet("color: #FFFFFF; background: #FF0000; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        summary_bar_layout.addWidget(self.lbl_red_count)
+        
+        self.lbl_na_count = QLabel("⬜ NA: 0")
+        self.lbl_na_count.setStyleSheet("color: #64748b; background: #e2e8f0; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        summary_bar_layout.addWidget(self.lbl_na_count)
+        
+        self.lbl_pass_fail = QLabel("")
+        self.lbl_pass_fail.setStyleSheet("color: #475569; font-size: 11px; margin-left: 8px;")
+        summary_bar_layout.addWidget(self.lbl_pass_fail)
+        
+        summary_bar_layout.addStretch()
+        self.summary_bar.hide()
+        right_layout.addWidget(self.summary_bar)
+        
         # Table
         self.table = QTableView()
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
@@ -602,6 +632,9 @@ class ReportGeneratorTab(QWidget):
         
         self.lbl_filter_count.setText(f"{shown}/{total} tasks shown • {with_avg} with Average")
         
+        # Update GREEN/YELLOW/RED/NA counts
+        self._update_summary_counts()
+        
         filters_active = []
         if parent != 'All':
             filters_active.append(f"Parent: {parent[:20]}")
@@ -616,6 +649,52 @@ class ReportGeneratorTab(QWidget):
             self.lbl_status.setText(f"Filtered: {' | '.join(filters_active)}")
         else:
             self.lbl_status.setText(f"Showing all {shown} subtasks")
+    
+    def _update_summary_counts(self):
+        """Update the GREEN/YELLOW/RED/NA count summary bar."""
+        if not self.filtered_tasks:
+            self.summary_bar.hide()
+            return
+        
+        green = 0
+        yellow = 0
+        red = 0
+        na = 0
+        
+        for t in self.filtered_tasks:
+            avg = t.get('Average', '')
+            if not avg or avg in ['', '-', '0']:
+                na += 1
+            else:
+                color = t.get('_brd_color', '')
+                if color == 'green':
+                    green += 1
+                elif color == 'yellow':
+                    yellow += 1
+                elif color == 'red':
+                    red += 1
+                else:
+                    na += 1
+        
+        total_applicable = green + yellow + red
+        pass_count = green + yellow
+        fail_count = red
+        
+        self.lbl_green_count.setText(f"🟢 GREEN: {green}")
+        self.lbl_yellow_count.setText(f"🟡 YELLOW: {yellow}")
+        self.lbl_red_count.setText(f"🔴 RED: {red}")
+        self.lbl_na_count.setText(f"⬜ NA: {na}")
+        
+        if total_applicable > 0:
+            pass_pct = (pass_count / total_applicable) * 100
+            self.lbl_pass_fail.setText(
+                f"PASS: {pass_count} | FAIL: {fail_count} | "
+                f"Pass Rate: {pass_pct:.0f}%"
+            )
+        else:
+            self.lbl_pass_fail.setText("")
+        
+        self.summary_bar.show()
     
     # ====================
     # BRD TARGET

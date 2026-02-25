@@ -248,7 +248,7 @@ class CsvImporter:
             # Calculate Dev% BRD
             if average is not None and perf_brd is not None and perf_brd != 0:
                 dev_brd = (average - perf_brd) / perf_brd
-                task['Deviation_BRD'] = f"{dev_brd:.4f}"
+                task['Deviation_BRD'] = f"{dev_brd * 100:.2f}%"
                 task['_dev_brd_value'] = dev_brd
                 task['BRD Status'] = CsvImporter._get_status(dev_brd)
                 task['_brd_color'] = CsvImporter._get_color(dev_brd)
@@ -262,7 +262,7 @@ class CsvImporter:
             # Calculate Dev% Prev
             if average is not None and prev_value is not None and prev_value != 0:
                 dev_prev = (average - prev_value) / prev_value
-                task['Deviation_Prev'] = f"{dev_prev:.4f}"
+                task['Deviation_Prev'] = f"{dev_prev * 100:.2f}%"
                 task['_dev_prev_value'] = dev_prev
                 task['Previous Status'] = CsvImporter._get_status(dev_prev)
                 task['_prev_color'] = CsvImporter._get_color(dev_prev)

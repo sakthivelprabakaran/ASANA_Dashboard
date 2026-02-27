@@ -18,14 +18,11 @@ from PyQt5.QtGui import QColor, QFont
 
 from core.data_loader import DataLoader
 from core.brd_matcher import BrdMatcher
+from core.config_manager import ConfigManager
 from ui.brd_viewer_dialog import BrdViewerDialog
 from ui.report_generator_tab import ReportGeneratorTab
 
 logger = logging.getLogger('AsanaGenerator.MainWindow')
-
-# Full device list matching web app exactly
-DEVICES = ['Malbec', 'Cava', 'Barolo', 'Rossini', 'Sangria', 'Pisco', 'Seabreeze',
-           'Gibson', 'Paloma', 'Calvados', 'Eanab', 'Decanter', 'Prosecco', 'Marsala']
 
 
 class TaskTableModel(QAbstractTableModel):
@@ -85,6 +82,9 @@ class MainWindow(QMainWindow):
         # Configuration queue - like web app's configQueue
         self.configQueue = []
         self.queue_file = os.path.join(os.path.expanduser('~'), '.asana_queue.json')
+        
+        # Config Manager (singleton)
+        self.config = ConfigManager()
         
         # BRD Matcher
         self.brdMatcher = BrdMatcher()
@@ -303,8 +303,15 @@ class MainWindow(QMainWindow):
         # Device
         config_layout.addWidget(QLabel("Target Device:"))
         self.combo_device = QComboBox()
-        self.combo_device.addItems(DEVICES)
+        self.combo_device.addItems(self.config.get_devices())
         config_layout.addWidget(self.combo_device)
+        
+        # Assignee
+        config_layout.addWidget(QLabel("👤 Assignee:"))
+        self.combo_assignee = QComboBox()
+        self.combo_assignee.setPlaceholderText("Select assignee...")
+        self._populate_assignee_dropdown()
+        config_layout.addWidget(self.combo_assignee)
         
         # Dashboard Component (OOBE only - hidden by default)
         self.lbl_dashboard_component = QLabel("Dashboard Component (OOBE):")
@@ -564,6 +571,11 @@ class MainWindow(QMainWindow):
         # === TAB 2: REPORT GENERATOR ===
         self.report_tab = ReportGeneratorTab(parent_window=self)
         self.tab_widget.addTab(self.report_tab, "📊 Report Generator")
+
+        # === TAB 3: SETTINGS ===
+        from ui.settings_dialog import SettingsTab
+        self.settings_tab = SettingsTab(config_manager=self.config, parent_window=self)
+        self.tab_widget.addTab(self.settings_tab, "⚙️ Settings")
         
         # Connect signals after all UI elements are created
         self.combo_template_sheet.currentIndexChanged.connect(self._on_template_sheet_changed)
@@ -826,6 +838,10 @@ class MainWindow(QMainWindow):
         if self._is_oobe_sheet(template_df, sheet_name):
             oobe_component = self.combo_dashboard_component.currentText()
         
+        # Get assignee
+        assignee_name = self.combo_assignee.currentText()
+        assignee_email = self.config.get_assignee_email(assignee_name) if assignee_name else ''
+        
         # Create config object (matching web app's configQueue structure)
         config = {
             'parentTask': parent_task,
@@ -837,7 +853,9 @@ class MainWindow(QMainWindow):
             'project': self.inp_project.text(),
             'section': self.inp_section.text(),
             'estimatedTasks': task_count,
-            'oobeComponent': oobe_component  # Store selected OOBE component
+            'oobeComponent': oobe_component,  # Store selected OOBE component
+            'assigneeName': assignee_name,
+            'assigneeEmail': assignee_email
         }
         
         self.configQueue.append(config)
@@ -859,7 +877,8 @@ class MainWindow(QMainWindow):
         for idx, config in enumerate(self.configQueue):
             total_tasks += config.get('estimatedTasks', 0)
             
-            text = f"📌 {config['parentTask']}  •  📱 {config['device']}  •  📄 {config['templateSheet']}  •  ~{config.get('estimatedTasks', 0)} tasks"
+            assignee_display = f"  •  👤 {config.get('assigneeName', '')}" if config.get('assigneeName') else ""
+            text = f"📌 {config['parentTask']}  •  📱 {config['device']}{assignee_display}  •  📄 {config['templateSheet']}  •  ~{config.get('estimatedTasks', 0)} tasks"
             
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, idx)
@@ -1213,21 +1232,8 @@ class MainWindow(QMainWindow):
 
     def _generate_export_rows(self) -> list:
         """Generate all rows for CSV export in Asana format."""
-        # Asana CSV column headers
-        HEADERS = [
-            "Task ID", "Created At", "Completed At", "Last Modified", "Name",
-            "Section/Column", "Assignee", "Assignee Email", "Start Date", "Due Date",
-            "Tags", "Notes", "Projects", "Parent task", "Blocked By (Dependencies)",
-            "Blocking (Dependencies)", "Estimated time", "Actual time", "Priority",
-            "Task Progress", "Iteration_01", "Iteration_02", "Iteration_03",
-            "Iteration_04", "iteration_05", "Average", "Perf_BRD",
-            "Deviation % Current Vs BRD", "GREEN", "YELLOW", "RED", "Devices",
-            "Previous Value", "BRD Status", "Deviation % Current vs Previous",
-            "Previous Status", "Tester Remark", "Logs Link", "Audited By",
-            "Auditor N-points elapsed time (h:m)", "DA Value", "Auditor Pass",
-            "iteration_06", "iteration_07", "iteration_08", "iteration_09",
-            "iteration_10", "Iteration count"
-        ]
+        # Asana CSV column headers — from config
+        HEADERS = self.config.get_export_headers()
         
         all_rows = []
         
@@ -1304,10 +1310,15 @@ class MainWindow(QMainWindow):
                 task_row['Perf_BRD'] = brd_match['perf_value']
                 task_row['Previous Value'] = brd_match['prev_value']
                 
-                # Add default deviation column values
-                task_row['GREEN'] = '0'
-                task_row['YELLOW'] = '0.1'
-                task_row['RED'] = '0.1'
+                # Set assignee from queue config (email goes to "Assignee Email" column)
+                assignee_email = config.get('assigneeEmail', '')
+                if assignee_email:
+                    task_row['Assignee Email'] = assignee_email
+                
+                # Add default deviation column values from config
+                defaults = self.config.get_default_export_values()
+                for dk, dv in defaults.items():
+                    task_row[dk] = dv
                 
                 all_rows.append(task_row)
                 
@@ -1342,6 +1353,16 @@ class MainWindow(QMainWindow):
             logger.warning(f"Could not load queue: {e}")
             self.configQueue = []
     
+    def _populate_assignee_dropdown(self):
+        """Populate the assignee dropdown from config."""
+        self.combo_assignee.clear()
+        self.combo_assignee.addItem("")  # Empty option = no assignee
+        for assignee in self.config.get_assignees():
+            name = assignee.get('name', '')
+            email = assignee.get('email', '')
+            if name:
+                self.combo_assignee.addItem(name)
+
     def _load_default_template(self):
         """Auto-load default template file if it exists."""
         if not os.path.exists(self.default_template_path):

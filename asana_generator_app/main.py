@@ -22,6 +22,12 @@ logger = logging.getLogger('AsanaGenerator')
 def main():
     app = QApplication(sys.argv)
     
+    # Use Fusion style for consistent cross-platform rendering.
+    # This ensures QSS has full control over all widgets including
+    # dialog buttons (QMessageBox, QInputDialog) which otherwise
+    # use Windows native rendering and ignore QSS colors.
+    app.setStyle('Fusion')
+    
     try:
         window = MainWindow()
         window.showMaximized()

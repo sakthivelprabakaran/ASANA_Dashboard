@@ -154,11 +154,12 @@ QComboBox QAbstractItemView {
 
 /* ==================== BUTTONS ==================== */
 
-/* Primary Button */
+/* Primary Button — uses dark text by default for dialog compatibility.
+   App buttons that need white text set it via inline styles. */
 QPushButton {
-    background-color: #3b82f6;
-    color: white;
-    border: none;
+    background-color: #e2e8f0;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
     border-radius: 6px;
     padding: 10px 20px;
     font-weight: 600;
@@ -166,16 +167,24 @@ QPushButton {
 }
 
 QPushButton:hover {
-    background-color: #2563eb;
+    background-color: #cbd5e1;
+    color: #1e293b;
+    border-color: #94a3b8;
 }
 
 QPushButton:pressed {
-    background-color: #1d4ed8;
+    background-color: #94a3b8;
+    color: #1e293b;
+}
+
+QPushButton:focus {
+    color: #1e293b;
 }
 
 QPushButton:disabled {
-    background-color: #cbd5e1;
+    background-color: #f1f5f9;
     color: #94a3b8;
+    border-color: #e2e8f0;
 }
 
 /* Secondary/Outline Button */
@@ -349,6 +358,108 @@ QDialog {
 
 QDialog QLabel {
     color: #1e293b;
+}
+
+/* ==================== MESSAGE BOX & DIALOG BUTTONS ==================== */
+
+QMessageBox {
+    background-color: #ffffff;
+}
+
+QMessageBox QLabel {
+    color: #1e293b;
+    font-size: 13px;
+    min-width: 250px;
+}
+
+QMessageBox QPushButton {
+    background-color: #e2e8f0;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px 24px;
+    font-weight: 600;
+    font-size: 13px;
+    min-width: 80px;
+    min-height: 28px;
+}
+
+QMessageBox QPushButton:hover {
+    background-color: #cbd5e1;
+    color: #1e293b;
+    border-color: #94a3b8;
+}
+
+QMessageBox QPushButton:pressed {
+    background-color: #94a3b8;
+    color: #1e293b;
+}
+
+QMessageBox QPushButton:focus {
+    background-color: #dbeafe;
+    color: #1e40af;
+    border: 2px solid #3b82f6;
+}
+
+QMessageBox QPushButton:default {
+    background-color: #dbeafe;
+    color: #1e40af;
+    border: 2px solid #3b82f6;
+}
+
+/* Dialog buttons (generic) */
+QDialog QPushButton {
+    min-width: 70px;
+    min-height: 26px;
+}
+
+QDialogButtonBox QPushButton {
+    background-color: #e2e8f0;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px 20px;
+    font-weight: 600;
+    font-size: 13px;
+    min-width: 80px;
+    min-height: 28px;
+}
+
+QDialogButtonBox QPushButton:hover {
+    background-color: #cbd5e1;
+}
+
+/* Input Dialog styling */
+QInputDialog {
+    background-color: #ffffff;
+}
+
+QInputDialog QLabel {
+    color: #1e293b;
+    font-size: 13px;
+}
+
+QInputDialog QLineEdit {
+    padding: 8px 12px;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    font-size: 13px;
+    min-width: 250px;
+}
+
+QInputDialog QPushButton {
+    background-color: #e2e8f0;
+    color: #1e293b;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 8px 24px;
+    font-weight: 600;
+    min-width: 80px;
+    min-height: 28px;
+}
+
+QInputDialog QPushButton:hover {
+    background-color: #cbd5e1;
 }
 
 /* ==================== TOOLTIPS ==================== */

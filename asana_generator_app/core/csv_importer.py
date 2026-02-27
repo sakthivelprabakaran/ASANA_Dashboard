@@ -1,11 +1,14 @@
 """
 CSV Importer - Parses Asana exported CSV files for the Report Generator.
 Extracts sections, parent tasks, subtasks with their Average, Perf_BRD, and Previous Value.
+All field names and thresholds are driven by config.json via ConfigManager.
 """
 
 import logging
 import pandas as pd
 from typing import Dict, List, Any, Optional
+
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger('AsanaGenerator.CsvImporter')
 
@@ -16,18 +19,15 @@ class CsvImporter:
     of sections, parent tasks, and subtasks with performance data.
     """
 
-    # Key columns we extract from Asana CSV
-    KEY_COLUMNS = [
-        'Name', 'Section/Column', 'Parent task', 'Projects', 'Devices',
-        'Average', 'Perf_BRD', 'Previous Value', 'Priority',
-        'BRD Status', 'Previous Status', 'Deviation % Current Vs BRD',
-        'Deviation % Current vs Previous', 'Estimated time',
-        'Iteration_01', 'Iteration_02', 'Iteration_03', 'Iteration_04',
-        'iteration_05', 'iteration_06', 'iteration_07', 'iteration_08',
-        'iteration_09', 'iteration_10', 'Iteration count',
-        'GREEN', 'YELLOW', 'RED', 'Assignee', 'Task Progress',
-        'Tester Remark', 'Audited By', 'Auditor Pass'
-    ]
+    @staticmethod
+    def _get_config() -> ConfigManager:
+        """Get the singleton ConfigManager instance."""
+        return ConfigManager()
+
+    @classmethod
+    def get_key_columns(cls) -> List[str]:
+        """Get key columns from config (no longer hardcoded)."""
+        return cls._get_config().get_all_csv_fields()
 
     @staticmethod
     def load_csv(file_path: str) -> pd.DataFrame:
@@ -102,47 +102,43 @@ class CsvImporter:
             if device:
                 devices.add(device)
             
-            # Extract performance values
-            average = str(row.get('Average', '')).strip()
-            perf_brd = str(row.get('Perf_BRD', '')).strip()
-            prev_value = str(row.get('Previous Value', '')).strip()
-            priority = str(row.get('Priority', '')).strip()
-            brd_status = str(row.get('BRD Status', '')).strip()
-            prev_status = str(row.get('Previous Status', '')).strip()
-            deviation_brd = str(row.get('Deviation % Current Vs BRD', '')).strip()
-            deviation_prev = str(row.get('Deviation % Current vs Previous', '')).strip()
-            
+            # Build task dict from core fields
             task = {
                 'Name': name,
                 'Parent task': parent_task,
                 'Section/Column': section,
                 'Projects': project,
                 'Devices': device,
-                'Average': average,
-                'Perf_BRD': perf_brd,
-                'Previous Value': prev_value,
-                'Priority': priority,
-                'BRD Status': brd_status,
-                'Previous Status': prev_status,
-                'Deviation_BRD': deviation_brd,
-                'Deviation_Prev': deviation_prev,
                 'is_subtask': is_subtask,
                 'is_parent': is_parent,
             }
             
-            # Add iteration values
-            for iter_col in ['Iteration_01', 'Iteration_02', 'Iteration_03', 
-                           'Iteration_04', 'iteration_05', 'iteration_06',
-                           'iteration_07', 'iteration_08', 'iteration_09', 'iteration_10']:
+            # Extract all configured fields dynamically from config
+            config = ConfigManager()
+            
+            # Performance fields
+            for field in config.get_csv_fields_by_category('performance_fields'):
+                task[field] = str(row.get(field, '')).strip()
+            
+            # Status fields
+            for field in config.get_csv_fields_by_category('status_fields'):
+                task[field] = str(row.get(field, '')).strip()
+            
+            # Deviation fields
+            for field in config.get_csv_fields_by_category('deviation_fields'):
+                task[field] = str(row.get(field, '')).strip()
+            
+            # Map deviation field names to internal keys
+            task['Deviation_BRD'] = task.get('Deviation % Current Vs BRD', '')
+            task['Deviation_Prev'] = task.get('Deviation % Current vs Previous', '')
+            
+            # Iteration fields (dynamically from config)
+            for iter_col in config.get_iteration_fields():
                 task[iter_col] = str(row.get(iter_col, '')).strip()
             
-            task['Iteration count'] = str(row.get('Iteration count', '')).strip()
-            task['Assignee'] = str(row.get('Assignee', '')).strip()
-            task['Task Progress'] = str(row.get('Task Progress', '')).strip()
-            task['Tester Remark'] = str(row.get('Tester Remark', '')).strip()
-            task['GREEN'] = str(row.get('GREEN', '')).strip()
-            task['YELLOW'] = str(row.get('YELLOW', '')).strip()
-            task['RED'] = str(row.get('RED', '')).strip()
+            # Meta fields
+            for field in config.get_csv_fields_by_category('meta_fields'):
+                task[field] = str(row.get(field, '')).strip()
             
             tasks.append(task)
         
@@ -288,34 +284,37 @@ class CsvImporter:
     @staticmethod
     def _get_color(deviation: float) -> str:
         """
-        Get color based on deviation value.
+        Get color based on deviation value. Thresholds from config.
         Negative deviation = current is BETTER (faster) than baseline = always GREEN
         Positive deviation = current is WORSE (slower) than baseline = check thresholds
         """
+        config = ConfigManager()
+        green_threshold = config.get_green_threshold()
+        yellow_threshold = config.get_yellow_threshold()
+        
         if deviation <= 0:
-            # Negative or zero = better or same as baseline = GREEN
             return 'green'
-        elif deviation < 0.005:
-            # Very small positive deviation (< 0.5%) = GREEN
+        elif deviation < green_threshold:
             return 'green'
-        elif deviation < 0.1:
-            # Small positive deviation (0.5% to 10%) = YELLOW
+        elif deviation < yellow_threshold:
             return 'yellow'
         else:
-            # Large positive deviation (>= 10%) = RED
             return 'red'
 
     @staticmethod
     def _get_status(deviation: float) -> str:
         """
-        Get PASS/FAIL status based on deviation.
+        Get PASS/FAIL status based on deviation. Threshold from config.
         Negative = PASS (better than baseline)
-        Positive < 10% = PASS (acceptable)
-        Positive >= 10% = FAIL (regression)
+        Positive < yellow_threshold = PASS (acceptable)
+        Positive >= yellow_threshold = FAIL (regression)
         """
+        config = ConfigManager()
+        yellow_threshold = config.get_yellow_threshold()
+        
         if deviation <= 0:
             return 'PASS'
-        elif deviation < 0.1:
+        elif deviation < yellow_threshold:
             return 'PASS'
         else:
             return 'FAIL'

@@ -14,6 +14,7 @@ from PyQt5.QtWidgets import QStyledItemDelegate, QStyleOptionViewItem
 from core.csv_importer import CsvImporter
 from core.brd_writer import BrdWriter
 from core.data_loader import DataLoader
+from core.config_manager import ConfigManager
 
 logger = logging.getLogger('AsanaGenerator.ReportGenerator')
 
@@ -84,33 +85,15 @@ class CsvCellDelegate(QStyledItemDelegate):
 
 
 class CsvTableModel(QAbstractTableModel):
-    """Table model for displaying filtered CSV task data."""
-    
-    DISPLAY_COLUMNS = [
-        'Parent task', 'Name', 'Devices', 'Average', 'Perf_BRD', 
-        'Previous Value', 'Priority', 'BRD Status', 'Previous Status',
-        'Deviation_BRD', 'Deviation_Prev', 'Assignee', 'Task Progress'
-    ]
-    
-    COLUMN_LABELS = {
-        'Parent task': 'Parent Task',
-        'Name': 'Scenario',
-        'Devices': 'Device',
-        'Average': 'Average',
-        'Perf_BRD': 'Perf BRD',
-        'Previous Value': 'Previous',
-        'Priority': 'Priority',
-        'BRD Status': 'BRD Status',
-        'Previous Status': 'Prev Status',
-        'Deviation_BRD': 'Dev% BRD',
-        'Deviation_Prev': 'Dev% Prev',
-        'Assignee': 'Assignee',
-        'Task Progress': 'Progress',
-    }
+    """Table model for displaying filtered CSV task data. Columns driven by config."""
 
     def __init__(self, data=None):
         super().__init__()
         self._data = data or []
+        # Load display columns from config
+        config = ConfigManager()
+        self.DISPLAY_COLUMNS = config.get_display_column_keys(visible_only=True)
+        self.COLUMN_LABELS = config.get_display_column_labels(visible_only=True)
         self._columns = self.DISPLAY_COLUMNS
 
     def set_data(self, data):

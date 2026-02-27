@@ -1,0 +1,196 @@
+{
+  "devices": [
+    "Barolo",
+    "Rossini",
+    "Sangria",
+    "Pisco",
+    "Seabreeze",
+    "Gibson",
+    "Paloma",
+    "Calvados",
+    "Eanab",
+    "Decanter",
+    "Prosecco",
+    "Marsala"
+  ],
+  "csv_fields": {
+    "core_fields": [
+      "Name",
+      "Section/Column",
+      "Parent task",
+      "Projects",
+      "Devices"
+    ],
+    "performance_fields": [
+      "Average",
+      "Perf_BRD",
+      "Previous Value"
+    ],
+    "status_fields": [
+      "Priority",
+      "BRD Status",
+      "Previous Status"
+    ],
+    "deviation_fields": [
+      "Deviation % Current Vs BRD",
+      "Deviation % Current vs Previous"
+    ],
+    "iteration_fields": [
+      "Iteration_01",
+      "Iteration_02",
+      "Iteration_03",
+      "Iteration_04",
+      "iteration_05",
+      "iteration_06",
+      "iteration_07",
+      "iteration_08",
+      "iteration_09",
+      "iteration_10"
+    ],
+    "meta_fields": [
+      "Iteration count",
+      "GREEN",
+      "YELLOW",
+      "RED",
+      "Assignee",
+      "Task Progress",
+      "Tester Remark",
+      "Audited By",
+      "Auditor Pass",
+      "Estimated time"
+    ]
+  },
+  "display_columns": [
+    {
+      "key": "Parent task",
+      "label": "Parent Task",
+      "visible": true
+    },
+    {
+      "key": "Name",
+      "label": "Scenario",
+      "visible": true
+    },
+    {
+      "key": "Devices",
+      "label": "Device",
+      "visible": true
+    },
+    {
+      "key": "Average",
+      "label": "Average",
+      "visible": true
+    },
+    {
+      "key": "Perf_BRD",
+      "label": "Perf BRD",
+      "visible": true
+    },
+    {
+      "key": "Previous Value",
+      "label": "Previous",
+      "visible": true
+    },
+    {
+      "key": "Priority",
+      "label": "Priority",
+      "visible": true
+    },
+    {
+      "key": "BRD Status",
+      "label": "BRD Status",
+      "visible": true
+    },
+    {
+      "key": "Previous Status",
+      "label": "Prev Status",
+      "visible": true
+    },
+    {
+      "key": "Deviation_BRD",
+      "label": "Dev% BRD",
+      "visible": true
+    },
+    {
+      "key": "Deviation_Prev",
+      "label": "Dev% Prev",
+      "visible": true
+    },
+    {
+      "key": "Assignee",
+      "label": "Assignee",
+      "visible": true
+    },
+    {
+      "key": "Task Progress",
+      "label": "Progress",
+      "visible": true
+    }
+  ],
+  "export_headers": [
+    "Task ID",
+    "Created At",
+    "Completed At",
+    "Last Modified",
+    "Name",
+    "Section/Column",
+    "Assignee",
+    "Assignee Email",
+    "Start Date",
+    "Due Date",
+    "Tags",
+    "Notes",
+    "Projects",
+    "Parent task",
+    "Blocked By (Dependencies)",
+    "Blocking (Dependencies)",
+    "Estimated time",
+    "Actual time",
+    "Priority",
+    "Task Progress",
+    "Iteration_01",
+    "Iteration_02",
+    "Iteration_03",
+    "Iteration_04",
+    "iteration_05",
+    "Average",
+    "Perf_BRD",
+    "Deviation % Current Vs BRD",
+    "GREEN",
+    "YELLOW",
+    "RED",
+    "Devices",
+    "Previous Value",
+    "BRD Status",
+    "Deviation % Current vs Previous",
+    "Previous Status",
+    "Tester Remark",
+    "Logs Link",
+    "Audited By",
+    "Auditor N-points elapsed time (h:m)",
+    "DA Value",
+    "Auditor Pass",
+    "iteration_06",
+    "iteration_07",
+    "iteration_08",
+    "iteration_09",
+    "iteration_10",
+    "Iteration count",
+    "Date of Execution"
+  ],
+  "thresholds": {
+    "green_max_deviation": 0.005,
+    "yellow_max_deviation": 0.1
+  },
+  "default_export_values": {
+    "GREEN": "0",
+    "YELLOW": "0.1",
+    "RED": "0.1"
+  },
+  "assignees": [
+    {
+      "email": "sakthimx@amazon.com",
+      "name": "Sakthivel prabakaran"
+    }
+  ]
+}

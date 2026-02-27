@@ -21,6 +21,7 @@ from core.brd_matcher import BrdMatcher
 from core.config_manager import ConfigManager
 from ui.brd_viewer_dialog import BrdViewerDialog
 from ui.report_generator_tab import ReportGeneratorTab
+from ui.manual_subtask_dialog import ManualSubtaskDialog
 
 logger = logging.getLogger('AsanaGenerator.MainWindow')
 
@@ -88,6 +89,9 @@ class MainWindow(QMainWindow):
         
         # BRD Matcher
         self.brdMatcher = BrdMatcher()
+        
+        # Manual subtasks (ad-hoc testing) - persists in memory during session
+        self.manualSubtasks = []  # List of {"name": str, "priority": str, "est_time": str}
         
         # UI Setup
         self.init_ui()
@@ -206,14 +210,46 @@ class MainWindow(QMainWindow):
         left_scroll.setWidget(left_widget)
         splitter.addWidget(left_scroll)
 
+        # === MODE TOGGLE ===
+        mode_frame = QFrame()
+        mode_frame.setStyleSheet("background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px;")
+        mode_inner = QHBoxLayout(mode_frame)
+        mode_inner.setContentsMargins(6, 6, 6, 6)
+        mode_inner.setSpacing(4)
+        
+        self.btn_template_mode = QPushButton("📄 Template")
+        self.btn_template_mode.setCursor(Qt.PointingHandCursor)
+        self.btn_template_mode.setCheckable(True)
+        self.btn_template_mode.setChecked(True)
+        self.btn_template_mode.clicked.connect(lambda: self._set_mode('template'))
+        self.btn_template_mode.setStyleSheet("""
+            QPushButton { padding: 8px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; background: #3b82f6; color: white; border: none; }
+            QPushButton:!checked { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+        """)
+        mode_inner.addWidget(self.btn_template_mode, 1)
+        
+        self.btn_manual_mode = QPushButton("🔧 Manual")
+        self.btn_manual_mode.setCursor(Qt.PointingHandCursor)
+        self.btn_manual_mode.setCheckable(True)
+        self.btn_manual_mode.setChecked(False)
+        self.btn_manual_mode.clicked.connect(lambda: self._set_mode('manual'))
+        self.btn_manual_mode.setStyleSheet("""
+            QPushButton { padding: 8px 12px; border-radius: 4px; font-weight: bold; font-size: 12px; background: #f59e0b; color: white; border: none; }
+            QPushButton:!checked { background: #f1f5f9; color: #64748b; border: 1px solid #e2e8f0; }
+        """)
+        mode_inner.addWidget(self.btn_manual_mode, 1)
+        
+        left_layout.addWidget(mode_frame)
+
         # === STEP 1: Load Files (Compact) ===
-        step1_label = QLabel("STEP 1: FILES")
-        step1_label.setObjectName("stepLabel")
-        step1_label.setStyleSheet("color: #3b82f6; font-weight: bold; font-size: 11px; letter-spacing: 1px;")
-        left_layout.addWidget(step1_label)
+        self.step1_label = QLabel("STEP 1: FILES")
+        self.step1_label.setObjectName("stepLabel")
+        self.step1_label.setStyleSheet("color: #3b82f6; font-weight: bold; font-size: 11px; letter-spacing: 1px;")
+        left_layout.addWidget(self.step1_label)
         
         # Template file - compact inline
-        tmpl_frame = QFrame()
+        self.tmpl_frame = QFrame()
+        tmpl_frame = self.tmpl_frame
         tmpl_frame.setStyleSheet("background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px;")
         tmpl_inner = QVBoxLayout(tmpl_frame)
         tmpl_inner.setContentsMargins(10, 8, 10, 8)
@@ -245,10 +281,11 @@ class MainWindow(QMainWindow):
         tmpl_sheet_row.addWidget(self.combo_template_sheet, 1)
         tmpl_inner.addLayout(tmpl_sheet_row)
         
-        left_layout.addWidget(tmpl_frame)
+        left_layout.addWidget(self.tmpl_frame)
         
         # BRD file - compact inline
-        brd_frame = QFrame()
+        self.brd_frame = QFrame()
+        brd_frame = self.brd_frame
         brd_frame.setStyleSheet("background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px;")
         brd_inner = QVBoxLayout(brd_frame)
         brd_inner.setContentsMargins(10, 8, 10, 8)
@@ -280,7 +317,7 @@ class MainWindow(QMainWindow):
         brd_sheet_row.addWidget(self.combo_brd_sheet, 1)
         brd_inner.addLayout(brd_sheet_row)
         
-        left_layout.addWidget(brd_frame)
+        left_layout.addWidget(self.brd_frame)
 
         # === STEP 2: Task Configuration (MOVED UP FROM STEP 3) ===
         step2_label = QLabel("STEP 2: CONFIGURATION")
@@ -337,12 +374,13 @@ class MainWindow(QMainWindow):
         left_layout.addWidget(config_frame)
 
         # === STEP 3: BRD Columns (MOVED FROM STEP 2) ===
-        step3_label = QLabel("STEP 3: BRD COLUMNS")
-        step3_label.setObjectName("stepLabel")
-        step3_label.setStyleSheet("color: #3b82f6; font-weight: bold; font-size: 11px; letter-spacing: 1px; margin-top: 8px;")
-        left_layout.addWidget(step3_label)
+        self.step3_label = QLabel("STEP 3: BRD COLUMNS")
+        self.step3_label.setObjectName("stepLabel")
+        self.step3_label.setStyleSheet("color: #3b82f6; font-weight: bold; font-size: 11px; letter-spacing: 1px; margin-top: 8px;")
+        left_layout.addWidget(self.step3_label)
         
-        brd_cols_frame = QFrame()
+        self.brd_cols_frame = QFrame()
+        brd_cols_frame = self.brd_cols_frame
         brd_cols_frame.setStyleSheet("background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px;")
         brd_cols_layout = QVBoxLayout(brd_cols_frame)
         brd_cols_layout.setContentsMargins(10, 10, 10, 10)
@@ -394,7 +432,34 @@ class MainWindow(QMainWindow):
         cols_row.addWidget(prev_box, 1)
         
         brd_cols_layout.addLayout(cols_row)
-        left_layout.addWidget(brd_cols_frame)
+        left_layout.addWidget(self.brd_cols_frame)
+
+        # === MANUAL MODE: Manage Subtasks button (hidden by default) ===
+        self.manual_section = QFrame()
+        self.manual_section.setStyleSheet("background: #ffffff; border: 1px solid #fcd34d; border-radius: 6px;")
+        manual_inner = QVBoxLayout(self.manual_section)
+        manual_inner.setContentsMargins(10, 10, 10, 10)
+        manual_inner.setSpacing(8)
+        
+        self.btn_manage_subtasks = QPushButton("📝 Manage Subtasks...")
+        self.btn_manage_subtasks.clicked.connect(self._open_manual_subtask_dialog)
+        self.btn_manage_subtasks.setCursor(Qt.PointingHandCursor)
+        self.btn_manage_subtasks.setStyleSheet("""
+            QPushButton {
+                background-color: #f59e0b; border: none; border-radius: 6px;
+                color: white; font-weight: bold; font-size: 12px; padding: 10px;
+            }
+            QPushButton:hover { background-color: #d97706; }
+        """)
+        manual_inner.addWidget(self.btn_manage_subtasks)
+        
+        self.lbl_manual_count = QLabel("📝 0 manual subtasks")
+        self.lbl_manual_count.setStyleSheet("color: #94a3b8; font-size: 11px;")
+        self.lbl_manual_count.setAlignment(Qt.AlignCenter)
+        manual_inner.addWidget(self.lbl_manual_count)
+        
+        self.manual_section.hide()  # Hidden by default (Template mode)
+        left_layout.addWidget(self.manual_section)
 
         # === ADD TO QUEUE BUTTON ===
         self.btn_add = QPushButton("➕ Add to Queue")
@@ -774,100 +839,133 @@ class MainWindow(QMainWindow):
     # QUEUE MANAGEMENT
     # ====================
 
+    def _is_manual_mode(self) -> bool:
+        """Check if currently in manual (ad-hoc) mode."""
+        return self.btn_manual_mode.isChecked()
+
     def add_to_queue(self):
-        """Add current configuration to the queue."""
-        # Validation
-        if not self.templateSheets:
-            QMessageBox.warning(self, "Missing Template", "Please load a template file first.")
-            return
-            
+        """Add current configuration to the queue. Supports both template and manual modes."""
+        is_manual = self._is_manual_mode()
+        
+        # Common validation
         parent_task = self.inp_parent.text().strip()
         if not parent_task:
             QMessageBox.warning(self, "Missing Parent Task", 
                 "Please enter a Parent Task Name.\n\nExample: P1 (8) - WiFi Stability")
             self.inp_parent.setFocus()
             return
-            
-        sheet_name = self._get_sheet_name(self.combo_template_sheet)
-        if not sheet_name or sheet_name not in self.templateSheets:
-            QMessageBox.warning(self, "Missing Sheet", "Please select a template sheet.")
-            return
-            
+        
         device = self.combo_device.currentText()
-        
-        # Calculate ACTUAL task count (only applicable tasks)
-        template_df = self.templateSheets[sheet_name]
-        brd_sheet = self._get_sheet_name(self.combo_brd_sheet)
-        brd_data = self.brdSheets.get(brd_sheet, []) if brd_sheet else []
-        
-        task_count = 0
-        for _, row in template_df.iterrows():
-            # Get scenario name
-            scenario = ''
-            for col in ['Performance Scenario', 'Scenario Name', 'Name']:
-                if col in row.index:
-                    val = row.get(col)
-                    if val and str(val).lower() not in ['nan', 'none', '']:
-                        scenario = str(val).strip()
-                        break
-            
-            if not scenario:
-                continue
-                
-            # Check device applicability
-            if not self._is_device_applicable_in_template(row, device):
-                continue
-                
-            # Check BRD matching (if BRD is loaded) - unified matching
-            if brd_data and len(brd_data) > 1:
-                brd_match = self._match_brd_for_task(
-                    scenario, device, row, template_df, sheet_name,
-                    brd_data,
-                    self.selectedPerfCol.get('columnIndex', -1),
-                    self.selectedPrevCol.get('columnIndex', -1)
-                )
-                
-                if not brd_match.get('applicable', True):
-                    continue
-            
-            # This task is applicable!
-            task_count += 1
-        
-        # Get OOBE component if applicable
-        oobe_component = ''
-        if self._is_oobe_sheet(template_df, sheet_name):
-            oobe_component = self.combo_dashboard_component.currentText()
-        
-        # Get assignee
         assignee_name = self.combo_assignee.currentText()
         assignee_email = self.config.get_assignee_email(assignee_name) if assignee_name else ''
+        manual_count = len(self.manualSubtasks)
         
-        # Create config object (matching web app's configQueue structure)
-        config = {
-            'parentTask': parent_task,
-            'device': device,
-            'templateSheet': sheet_name,
-            'brdSheet': brd_sheet,
-            'perfColumnInfo': self.selectedPerfCol.copy(),
-            'prevColumnInfo': self.selectedPrevCol.copy(),
-            'project': self.inp_project.text(),
-            'section': self.inp_section.text(),
-            'estimatedTasks': task_count,
-            'oobeComponent': oobe_component,  # Store selected OOBE component
-            'assigneeName': assignee_name,
-            'assigneeEmail': assignee_email
-        }
-        
-        self.configQueue.append(config)
-        self._render_queue()
-        self._save_queue_to_file()
-        
-        # Clear parent task for next entry
-        self.inp_parent.clear()
-        self.inp_parent.setFocus()
-        
-        self.lbl_status.setText(f"Added: {parent_task} ({task_count} tasks)")
-        logger.info(f"Added to queue: '{parent_task}' - {device} - {sheet_name} ({task_count} tasks)")
+        if is_manual:
+            # === MANUAL MODE: no template required ===
+            if manual_count == 0:
+                QMessageBox.warning(self, "No Subtasks", 
+                    "Please add at least one manual subtask.\n\n"
+                    "Click '📝 Manage Subtasks...' to add test cases.")
+                return
+            
+            config = {
+                'parentTask': parent_task,
+                'device': device,
+                'templateSheet': '(manual)',
+                'brdSheet': '',
+                'perfColumnInfo': {"name": "", "columnIndex": -1},
+                'prevColumnInfo': {"name": "", "columnIndex": -1},
+                'project': self.inp_project.text(),
+                'section': self.inp_section.text(),
+                'estimatedTasks': 0,
+                'oobeComponent': '',
+                'assigneeName': assignee_name,
+                'assigneeEmail': assignee_email,
+                'manualSubtasks': list(self.manualSubtasks),
+                'isManual': True
+            }
+            
+            self.configQueue.append(config)
+            self._render_queue()
+            self._save_queue_to_file()
+            
+            self.inp_parent.clear()
+            self.inp_parent.setFocus()
+            
+            self.lbl_status.setText(f"Added (manual): {parent_task} ({manual_count} subtasks)")
+            logger.info(f"Added manual to queue: '{parent_task}' - {device} ({manual_count} subtasks)")
+        else:
+            # === TEMPLATE MODE: existing behavior ===
+            if not self.templateSheets:
+                QMessageBox.warning(self, "Missing Template", "Please load a template file first.")
+                return
+            
+            sheet_name = self._get_sheet_name(self.combo_template_sheet)
+            if not sheet_name or sheet_name not in self.templateSheets:
+                QMessageBox.warning(self, "Missing Sheet", "Please select a template sheet.")
+                return
+            
+            # Calculate ACTUAL task count (only applicable tasks)
+            template_df = self.templateSheets[sheet_name]
+            brd_sheet = self._get_sheet_name(self.combo_brd_sheet)
+            brd_data = self.brdSheets.get(brd_sheet, []) if brd_sheet else []
+            
+            task_count = 0
+            for _, row in template_df.iterrows():
+                scenario = ''
+                for col in ['Performance Scenario', 'Scenario Name', 'Name']:
+                    if col in row.index:
+                        val = row.get(col)
+                        if val and str(val).lower() not in ['nan', 'none', '']:
+                            scenario = str(val).strip()
+                            break
+                
+                if not scenario:
+                    continue
+                if not self._is_device_applicable_in_template(row, device):
+                    continue
+                if brd_data and len(brd_data) > 1:
+                    brd_match = self._match_brd_for_task(
+                        scenario, device, row, template_df, sheet_name,
+                        brd_data,
+                        self.selectedPerfCol.get('columnIndex', -1),
+                        self.selectedPrevCol.get('columnIndex', -1)
+                    )
+                    if not brd_match.get('applicable', True):
+                        continue
+                task_count += 1
+            
+            oobe_component = ''
+            if self._is_oobe_sheet(template_df, sheet_name):
+                oobe_component = self.combo_dashboard_component.currentText()
+            
+            config = {
+                'parentTask': parent_task,
+                'device': device,
+                'templateSheet': sheet_name,
+                'brdSheet': brd_sheet,
+                'perfColumnInfo': self.selectedPerfCol.copy(),
+                'prevColumnInfo': self.selectedPrevCol.copy(),
+                'project': self.inp_project.text(),
+                'section': self.inp_section.text(),
+                'estimatedTasks': task_count,
+                'oobeComponent': oobe_component,
+                'assigneeName': assignee_name,
+                'assigneeEmail': assignee_email,
+                'manualSubtasks': list(self.manualSubtasks),
+                'isManual': False
+            }
+            
+            self.configQueue.append(config)
+            self._render_queue()
+            self._save_queue_to_file()
+            
+            self.inp_parent.clear()
+            self.inp_parent.setFocus()
+            
+            manual_info = f" + {manual_count} manual" if manual_count > 0 else ""
+            self.lbl_status.setText(f"Added: {parent_task} ({task_count} tasks{manual_info})")
+            logger.info(f"Added to queue: '{parent_task}' - {device} - {sheet_name} ({task_count} tasks{manual_info})")
 
     def _render_queue(self):
         """Render the queue as list items with right-click context menu."""
@@ -877,8 +975,10 @@ class MainWindow(QMainWindow):
         for idx, config in enumerate(self.configQueue):
             total_tasks += config.get('estimatedTasks', 0)
             
+            manual_sub_count = len(config.get('manualSubtasks', []))
             assignee_display = f"  •  👤 {config.get('assigneeName', '')}" if config.get('assigneeName') else ""
-            text = f"📌 {config['parentTask']}  •  📱 {config['device']}{assignee_display}  •  📄 {config['templateSheet']}  •  ~{config.get('estimatedTasks', 0)} tasks"
+            manual_display = f" + {manual_sub_count} manual" if manual_sub_count > 0 else ""
+            text = f"📌 {config['parentTask']}  •  📱 {config['device']}{assignee_display}  •  📄 {config['templateSheet']}  •  ~{config.get('estimatedTasks', 0)} tasks{manual_display}"
             
             item = QListWidgetItem(text)
             item.setData(Qt.UserRole, idx)
@@ -1087,61 +1187,69 @@ class MainWindow(QMainWindow):
         skipped_brd = 0       # Filtered by BRD matching
         
         for config in self.configQueue:
-            template_sheet = config['templateSheet']
-            if template_sheet not in self.templateSheets:
-                continue
-                
-            template_df = self.templateSheets[template_sheet]
             device = config['device']
+            is_manual_entry = config.get('isManual', False)
+            template_sheet = config['templateSheet']
             
-            # Get BRD data
-            brd_sheet = config.get('brdSheet')
-            brd_data = self.brdSheets.get(brd_sheet, []) if brd_sheet else []
-            perf_idx = config['perfColumnInfo'].get('columnIndex', -1)
-            prev_idx = config['prevColumnInfo'].get('columnIndex', -1)
+            # Process template tasks (only for non-manual entries)
+            if not is_manual_entry and template_sheet in self.templateSheets:
+                template_df = self.templateSheets[template_sheet]
+                
+                brd_sheet = config.get('brdSheet')
+                brd_data = self.brdSheets.get(brd_sheet, []) if brd_sheet else []
+                perf_idx = config['perfColumnInfo'].get('columnIndex', -1)
+                prev_idx = config['prevColumnInfo'].get('columnIndex', -1)
+                
+                for _, row in template_df.iterrows():
+                    scenario = ''
+                    for col in ['Performance Scenario', 'Scenario Name', 'Name']:
+                        if col in row.index:
+                            val = row.get(col)
+                            if val and str(val).lower() not in ['nan', 'none', '']:
+                                scenario = str(val).strip()
+                                break
+                    
+                    if not scenario:
+                        continue
+                    
+                    if not self._is_device_applicable_in_template(row, device):
+                        skipped_template += 1
+                        continue
+                        
+                    brd_match = {'perf_value': '-', 'prev_value': '-'}
+                    if brd_data and len(brd_data) > 1:
+                        brd_match = self._match_brd_for_task(
+                            scenario, device, row, template_df, template_sheet,
+                            brd_data, perf_idx, prev_idx, config=config
+                        )
+                        
+                    priority = row.get('Priority', '')
+                    if str(priority).lower() in ['nan', 'none', '']:
+                        priority = '-'
+                        
+                    est_time = row.get('Estimated Time') or row.get('Time', '')
+                    
+                    task = {
+                        'Parent Task': config['parentTask'],
+                        'Scenario': scenario,
+                        'Device': device,
+                        'Priority': str(priority),
+                        'Est. Time': self._format_time(est_time),
+                        'Perf_BRD': brd_match['perf_value'],
+                        'Previous Value': brd_match['prev_value']
+                    }
+                    all_tasks.append(task)
             
-            for _, row in template_df.iterrows():
-                # Get scenario name (try multiple possible column names)
-                scenario = ''
-                for col in ['Performance Scenario', 'Scenario Name', 'Name']:
-                    if col in row.index:
-                        val = row.get(col)
-                        if val and str(val).lower() not in ['nan', 'none', '']:
-                            scenario = str(val).strip()
-                            break
-                
-                if not scenario:
-                    continue
-                
-                # STEP 1: Check Template's Applicable Devices column FIRST
-                if not self._is_device_applicable_in_template(row, device):
-                    skipped_template += 1
-                    continue
-                    
-                # STEP 2: Fetch BRD data (Perf and Previous values) - unified matching
-                brd_match = {'perf_value': '-', 'prev_value': '-'}
-                if brd_data and len(brd_data) > 1:
-                    brd_match = self._match_brd_for_task(
-                        scenario, device, row, template_df, template_sheet,
-                        brd_data, perf_idx, prev_idx, config=config
-                    )
-                    
-                # Get Priority from Template
-                priority = row.get('Priority', '')
-                if str(priority).lower() in ['nan', 'none', '']:
-                    priority = '-'
-                    
-                # Format estimated time
-                est_time = row.get('Estimated Time') or row.get('Time', '')
-                
+            # Add manual subtasks for this config
+            for manual in config.get('manualSubtasks', []):
                 task = {
                     'Parent Task': config['parentTask'],
-                    'Scenario': scenario,
+                    'Scenario': f"🔧 {manual['name']}",
                     'Device': device,
-                    'Priority': str(priority),
-                    'Est. Time': self._format_time(est_time),
-                    'Perf_BRD': brd_match['perf_value'],
-                    'Previous Value': brd_match['prev_value']
+                    'Priority': manual.get('priority', ''),
+                    'Est. Time': manual.get('est_time', ''),
+                    'Perf_BRD': '',
+                    'Previous Value': ''
                 }
                 all_tasks.append(task)
         
@@ -1238,23 +1346,12 @@ class MainWindow(QMainWindow):
         all_rows = []
         
         for config in self.configQueue:
+            is_manual_entry = config.get('isManual', False)
             template_sheet = config['templateSheet']
-            if template_sheet not in self.templateSheets:
-                continue
-                
-            template_df = self.templateSheets[template_sheet]
             device = config['device']
             section = config['section']
             project = config['project']
             parent_task = config['parentTask']
-            
-            brd_sheet = config.get('brdSheet')
-            brd_data = self.brdSheets.get(brd_sheet, []) if brd_sheet else []
-            perf_idx = config['perfColumnInfo'].get('columnIndex', -1)
-            prev_idx = config['prevColumnInfo'].get('columnIndex', -1)
-            
-            # Section is now only added to the parent task's Section/Column field
-            # No separate section row is created
             
             # Add parent task row
             parent_row = {h: '' for h in HEADERS}
@@ -1263,59 +1360,78 @@ class MainWindow(QMainWindow):
             parent_row['Projects'] = project
             all_rows.append(parent_row)
             
-            # Add task rows
-            for _, template_row in template_df.iterrows():
-                # Get scenario name
-                scenario = ''
-                for col in ['Performance Scenario', 'Scenario Name', 'Name']:
-                    if col in template_row.index:
-                        val = template_row.get(col)
-                        if val and str(val).lower() not in ['nan', 'none', '']:
-                            scenario = str(val).strip()
-                            break
+            # Add template task rows (only for non-manual entries)
+            if not is_manual_entry and template_sheet in self.templateSheets:
+                template_df = self.templateSheets[template_sheet]
+                brd_sheet = config.get('brdSheet')
+                brd_data = self.brdSheets.get(brd_sheet, []) if brd_sheet else []
+                perf_idx = config['perfColumnInfo'].get('columnIndex', -1)
+                prev_idx = config['prevColumnInfo'].get('columnIndex', -1)
                 
-                if not scenario:
-                    continue
-                
-                # STEP 1: Check Template's Applicable Devices column
-                if not self._is_device_applicable_in_template(template_row, device):
-                    continue
+                for _, template_row in template_df.iterrows():
+                    scenario = ''
+                    for col in ['Performance Scenario', 'Scenario Name', 'Name']:
+                        if col in template_row.index:
+                            val = template_row.get(col)
+                            if val and str(val).lower() not in ['nan', 'none', '']:
+                                scenario = str(val).strip()
+                                break
                     
-                # STEP 2: Match with BRD (if loaded) - unified matching
-                brd_match = {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
-                if brd_data and len(brd_data) > 1:
-                    brd_match = self._match_brd_for_task(
-                        scenario, device, template_row, template_df, template_sheet,
-                        brd_data, perf_idx, prev_idx, config=config
-                    )
-                    
-                    if not brd_match.get('applicable', True):
+                    if not scenario:
                         continue
                     
-                est_time = template_row.get('Estimated Time') or template_row.get('Time', '')
-                
-                # Get Priority from Template
-                priority = template_row.get('Priority', '')
-                if str(priority).lower() in ['nan', 'none', '']:
-                    priority = ''
-                
+                    if not self._is_device_applicable_in_template(template_row, device):
+                        continue
+                        
+                    brd_match = {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+                    if brd_data and len(brd_data) > 1:
+                        brd_match = self._match_brd_for_task(
+                            scenario, device, template_row, template_df, template_sheet,
+                            brd_data, perf_idx, prev_idx, config=config
+                        )
+                        if not brd_match.get('applicable', True):
+                            continue
+                        
+                    est_time = template_row.get('Estimated Time') or template_row.get('Time', '')
+                    priority = template_row.get('Priority', '')
+                    if str(priority).lower() in ['nan', 'none', '']:
+                        priority = ''
+                    
+                    task_row = {h: '' for h in HEADERS}
+                    task_row['Name'] = scenario
+                    task_row['Parent task'] = parent_task
+                    task_row['Devices'] = device
+                    task_row['Priority'] = str(priority)
+                    task_row['Estimated time'] = self._format_time(est_time)
+                    task_row['Perf_BRD'] = brd_match['perf_value']
+                    task_row['Previous Value'] = brd_match['prev_value']
+                    
+                    assignee_email = config.get('assigneeEmail', '')
+                    if assignee_email:
+                        task_row['Assignee Email'] = assignee_email
+                    
+                    defaults = self.config.get_default_export_values()
+                    for dk, dv in defaults.items():
+                        task_row[dk] = dv
+                    
+                    all_rows.append(task_row)
+            
+            # Add manual subtasks for this config
+            for manual in config.get('manualSubtasks', []):
                 task_row = {h: '' for h in HEADERS}
-                task_row['Name'] = scenario
-                # Note: Section/Column and Projects are NOT set on subtasks
-                # They are only set on the parent task row (done earlier in the code)
+                task_row['Name'] = manual['name']
                 task_row['Parent task'] = parent_task
                 task_row['Devices'] = device
-                task_row['Priority'] = str(priority)
-                task_row['Estimated time'] = self._format_time(est_time)
-                task_row['Perf_BRD'] = brd_match['perf_value']
-                task_row['Previous Value'] = brd_match['prev_value']
+                task_row['Priority'] = manual.get('priority', '')
+                task_row['Estimated time'] = manual.get('est_time', '')
+                # No Perf_BRD, no Previous Value for manual subtasks
                 
-                # Set assignee from queue config (email goes to "Assignee Email" column)
+                # Set assignee
                 assignee_email = config.get('assigneeEmail', '')
                 if assignee_email:
                     task_row['Assignee Email'] = assignee_email
                 
-                # Add default deviation column values from config
+                # Add default deviation column values
                 defaults = self.config.get_default_export_values()
                 for dk, dv in defaults.items():
                     task_row[dk] = dv
@@ -1353,6 +1469,47 @@ class MainWindow(QMainWindow):
             logger.warning(f"Could not load queue: {e}")
             self.configQueue = []
     
+    # ====================
+    # MODE TOGGLE & MANUAL SUBTASKS
+    # ====================
+    
+    def _set_mode(self, mode: str):
+        """Toggle between Template and Manual mode."""
+        is_template = (mode == 'template')
+        
+        # Update toggle buttons
+        self.btn_template_mode.setChecked(is_template)
+        self.btn_manual_mode.setChecked(not is_template)
+        
+        # Show/hide template-specific sections
+        self.step1_label.setVisible(is_template)
+        self.tmpl_frame.setVisible(is_template)
+        self.brd_frame.setVisible(is_template)
+        self.step3_label.setVisible(is_template)
+        self.brd_cols_frame.setVisible(is_template)
+        
+        # Show/hide manual section
+        self.manual_section.setVisible(not is_template)
+        
+        self.lbl_status.setText(f"Mode: {'Template' if is_template else 'Manual (Ad-Hoc)'}")
+    
+    def _open_manual_subtask_dialog(self):
+        """Open the manual subtask management popup dialog."""
+        dialog = ManualSubtaskDialog(subtasks=self.manualSubtasks, parent=self)
+        if dialog.exec_():
+            self.manualSubtasks = dialog.get_subtasks()
+            self._update_manual_count()
+            logger.info(f"Manual subtasks updated: {len(self.manualSubtasks)} subtasks")
+    
+    def _update_manual_count(self):
+        """Update the manual subtask count label."""
+        count = len(self.manualSubtasks)
+        self.lbl_manual_count.setText(f"📝 {count} manual subtask{'s' if count != 1 else ''}")
+        if count > 0:
+            self.lbl_manual_count.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
+        else:
+            self.lbl_manual_count.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
     def _populate_assignee_dropdown(self):
         """Populate the assignee dropdown from config."""
         self.combo_assignee.clear()

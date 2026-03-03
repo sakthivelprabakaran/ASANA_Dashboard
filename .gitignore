@@ -25,6 +25,14 @@ Thumbs.db
 ~$*.xlsx
 ~$*.xls
 
+# Word temp files
+~$*.docx
+~$*.doc
+~WRL*.tmp
+
+# Documentation (generated, not tracked)
+*.docx
+
 # Logs
 *.log
 

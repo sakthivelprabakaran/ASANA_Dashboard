@@ -149,6 +149,17 @@ class MainWindow(QMainWindow):
         
         header_layout.addStretch()
         
+        # Profile selector in header
+        header_layout.addWidget(QLabel("Profile:"))
+        self.combo_profile = QComboBox()
+        self.combo_profile.setMinimumWidth(180)
+        self.combo_profile.setStyleSheet("padding: 4px 8px; font-size: 12px; font-weight: bold;")
+        self._populate_profile_dropdown()
+        self.combo_profile.currentTextChanged.connect(self._on_profile_changed)
+        header_layout.addWidget(self.combo_profile)
+        
+        header_layout.addSpacing(16)
+        
         self.lbl_status = QLabel("Ready - Load files to begin")
         self.lbl_status.setObjectName("status")
         self.lbl_status.setStyleSheet("color: #64748b; font-size: 12px;")
@@ -1509,6 +1520,49 @@ class MainWindow(QMainWindow):
             self.lbl_manual_count.setStyleSheet("color: #f59e0b; font-size: 11px; font-weight: bold;")
         else:
             self.lbl_manual_count.setStyleSheet("color: #94a3b8; font-size: 11px;")
+
+    def _populate_profile_dropdown(self):
+        """Populate the profile selector dropdown."""
+        self.combo_profile.blockSignals(True)
+        self.combo_profile.clear()
+        profiles = self.config.list_profiles()
+        active = self.config.get_active_profile()
+        for p in profiles:
+            self.combo_profile.addItem(p)
+        idx = self.combo_profile.findText(active)
+        if idx >= 0:
+            self.combo_profile.setCurrentIndex(idx)
+        self.combo_profile.blockSignals(False)
+
+    def _on_profile_changed(self, profile_name: str):
+        """Handle profile switch from the header dropdown."""
+        if not profile_name or profile_name == self.config.get_active_profile():
+            return
+        
+        self.config.switch_profile(profile_name)
+        self._refresh_after_profile_switch()
+        self.lbl_status.setText(f"Switched to profile: {profile_name}")
+        logger.info(f"Profile switched to: {profile_name}")
+
+    def _refresh_after_profile_switch(self):
+        """Refresh all UI elements after a profile switch."""
+        # Refresh device dropdown
+        current_device = self.combo_device.currentText()
+        self.combo_device.clear()
+        self.combo_device.addItems(self.config.get_devices())
+        idx = self.combo_device.findText(current_device)
+        if idx >= 0:
+            self.combo_device.setCurrentIndex(idx)
+        
+        # Refresh assignee dropdown
+        self._populate_assignee_dropdown()
+        
+        # Refresh settings tab if it exists
+        if hasattr(self, 'settings_tab'):
+            self.settings_tab._load_from_config()
+        
+        # Refresh profile dropdown
+        self._populate_profile_dropdown()
 
     def _populate_assignee_dropdown(self):
         """Populate the assignee dropdown from config."""

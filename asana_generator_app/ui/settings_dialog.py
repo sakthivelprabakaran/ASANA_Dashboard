@@ -8,7 +8,8 @@ import logging
 from PyQt5.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                              QLineEdit, QListWidget, QListWidgetItem, QMessageBox,
                              QFrame, QScrollArea, QTabWidget, QGroupBox, QDoubleSpinBox,
-                             QCheckBox, QSplitter, QInputDialog, QAbstractItemView)
+                             QCheckBox, QSplitter, QInputDialog, QAbstractItemView,
+                             QFileDialog)
 from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QFont
 
@@ -529,6 +530,88 @@ class SettingsTab(QWidget):
         
         self.inner_tabs.addTab(assignee_tab, "👤 Assignees")
         
+        # --- Tab 7: Team Profiles ---
+        profile_tab = QWidget()
+        profile_layout = QVBoxLayout(profile_tab)
+        profile_layout.setContentsMargins(16, 16, 16, 16)
+        
+        profile_info = QLabel(
+            "🏢 <b>Team Profiles</b> — Each team can have its own configuration with different fields, "
+            "devices, thresholds, and assignees. Create a profile from an Asana CSV export, or import "
+            "a shared profile from a colleague."
+        )
+        profile_info.setWordWrap(True)
+        profile_info.setStyleSheet("color: #475569; font-size: 12px; background: #f0fdf4; "
+                                    "padding: 10px; border-radius: 6px; border-left: 3px solid #22c55e;")
+        profile_layout.addWidget(profile_info)
+        
+        # Active profile indicator
+        self.lbl_active_profile = QLabel(f"Active: {self.config.get_active_profile()}")
+        self.lbl_active_profile.setStyleSheet("font-size: 14px; font-weight: bold; color: #22c55e; padding: 4px;")
+        profile_layout.addWidget(self.lbl_active_profile)
+        
+        # Profile list
+        self.profile_list = QListWidget()
+        self.profile_list.setAlternatingRowColors(True)
+        self.profile_list.setStyleSheet("""
+            QListWidget { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 4px; font-size: 12px; }
+            QListWidget::item { padding: 10px 8px; border-bottom: 1px solid #f1f5f9; }
+            QListWidget::item:selected { background: #f0fdf4; }
+        """)
+        profile_layout.addWidget(self.profile_list, 1)
+        self._load_profile_list()
+        
+        # Profile action buttons
+        prof_btn_row1 = QHBoxLayout()
+        prof_btn_row1.setSpacing(8)
+        
+        btn_create_csv = QPushButton("📥 Create from CSV")
+        btn_create_csv.clicked.connect(self._create_profile_from_csv)
+        btn_create_csv.setCursor(Qt.PointingHandCursor)
+        btn_create_csv.setStyleSheet("padding: 8px 14px; background: #22c55e; color: white; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        prof_btn_row1.addWidget(btn_create_csv)
+        
+        btn_create_empty = QPushButton("➕ Create Empty")
+        btn_create_empty.clicked.connect(self._create_empty_profile)
+        btn_create_empty.setCursor(Qt.PointingHandCursor)
+        btn_create_empty.setStyleSheet("padding: 8px 14px; background: #3b82f6; color: white; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        prof_btn_row1.addWidget(btn_create_empty)
+        
+        btn_import_profile = QPushButton("📂 Import")
+        btn_import_profile.clicked.connect(self._import_profile)
+        btn_import_profile.setCursor(Qt.PointingHandCursor)
+        btn_import_profile.setStyleSheet("padding: 8px 14px; background: #8b5cf6; color: white; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        prof_btn_row1.addWidget(btn_import_profile)
+        
+        prof_btn_row1.addStretch()
+        profile_layout.addLayout(prof_btn_row1)
+        
+        prof_btn_row2 = QHBoxLayout()
+        prof_btn_row2.setSpacing(8)
+        
+        btn_export_profile = QPushButton("💾 Export")
+        btn_export_profile.clicked.connect(self._export_profile)
+        btn_export_profile.setCursor(Qt.PointingHandCursor)
+        btn_export_profile.setStyleSheet("padding: 6px 14px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        prof_btn_row2.addWidget(btn_export_profile)
+        
+        btn_rename_profile = QPushButton("✏️ Rename")
+        btn_rename_profile.clicked.connect(self._rename_profile)
+        btn_rename_profile.setCursor(Qt.PointingHandCursor)
+        btn_rename_profile.setStyleSheet("padding: 6px 14px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        prof_btn_row2.addWidget(btn_rename_profile)
+        
+        btn_delete_profile = QPushButton("🗑️ Delete")
+        btn_delete_profile.clicked.connect(self._delete_profile)
+        btn_delete_profile.setCursor(Qt.PointingHandCursor)
+        btn_delete_profile.setStyleSheet("padding: 6px 14px; background: #fee2e2; color: #dc2626; border: 1px solid #fecaca; border-radius: 4px; font-weight: bold; font-size: 11px;")
+        prof_btn_row2.addWidget(btn_delete_profile)
+        
+        prof_btn_row2.addStretch()
+        profile_layout.addLayout(prof_btn_row2)
+        
+        self.inner_tabs.addTab(profile_tab, "🏢 Team Profiles")
+        
         # === SAVE BAR (always visible at bottom) ===
         save_bar = QFrame()
         save_bar.setStyleSheet("background: #ffffff; border-top: 1px solid #e2e8f0;")
@@ -803,6 +886,138 @@ class SettingsTab(QWidget):
                 self.assignee_list.takeItem(current)
                 self.lbl_assignee_count.setText(f"{self.assignee_list.count()} assignee(s)")
     
+    # ====================
+    # TEAM PROFILE MANAGEMENT
+    # ====================
+    
+    def _load_profile_list(self):
+        """Load available profiles into the list widget."""
+        self.profile_list.clear()
+        active = self.config.get_active_profile()
+        for name in self.config.list_profiles():
+            prefix = "✅ " if name == active else "   "
+            item = QListWidgetItem(f"{prefix}{name}")
+            item.setData(Qt.UserRole, name)
+            self.profile_list.addItem(item)
+        if hasattr(self, 'lbl_active_profile'):
+            self.lbl_active_profile.setText(f"Active: {active}")
+    
+    def _create_profile_from_csv(self):
+        """Create a new profile by importing an Asana CSV file."""
+        fname, _ = QFileDialog.getOpenFileName(
+            self, "Select Asana CSV", "", "CSV Files (*.csv);;All Files (*)")
+        if not fname:
+            return
+        
+        name, ok = QInputDialog.getText(self, "Profile Name",
+            "Enter a name for this team profile:\ne.g., 'Localization QA' or 'Accessibility Team'")
+        if not ok or not name.strip():
+            return
+        
+        if self.config.create_profile_from_csv(fname, name.strip()):
+            self._load_profile_list()
+            QMessageBox.information(self, "Profile Created",
+                f"Profile '{name.strip()}' created from CSV.\n\n"
+                f"Switch to it using the Profile dropdown in the header.")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to create profile from CSV.")
+    
+    def _create_empty_profile(self):
+        """Create a new empty profile."""
+        name, ok = QInputDialog.getText(self, "New Profile",
+            "Enter a name for the new profile:")
+        if not ok or not name.strip():
+            return
+        
+        if self.config.create_empty_profile(name.strip()):
+            self._load_profile_list()
+            if self.parent_window and hasattr(self.parent_window, '_populate_profile_dropdown'):
+                self.parent_window._populate_profile_dropdown()
+            QMessageBox.information(self, "Created", f"Empty profile '{name.strip()}' created.")
+        else:
+            QMessageBox.warning(self, "Error", f"Profile '{name.strip()}' already exists.")
+    
+    def _import_profile(self):
+        """Import a profile from a shared JSON file."""
+        fname, _ = QFileDialog.getOpenFileName(
+            self, "Import Profile", "", "JSON Files (*.json);;All Files (*)")
+        if not fname:
+            return
+        
+        result = self.config.import_profile(fname)
+        if result:
+            self._load_profile_list()
+            if self.parent_window and hasattr(self.parent_window, '_populate_profile_dropdown'):
+                self.parent_window._populate_profile_dropdown()
+            QMessageBox.information(self, "Imported", f"Profile '{result}' imported successfully.")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to import profile.")
+    
+    def _export_profile(self):
+        """Export the selected profile as a JSON file for sharing."""
+        current = self.profile_list.currentItem()
+        if not current:
+            QMessageBox.warning(self, "No Selection", "Please select a profile to export.")
+            return
+        
+        name = current.data(Qt.UserRole)
+        fname, _ = QFileDialog.getSaveFileName(
+            self, "Export Profile", f"{name}.json", "JSON Files (*.json)")
+        if not fname:
+            return
+        
+        if self.config.export_profile(name, fname):
+            QMessageBox.information(self, "Exported", f"Profile '{name}' exported to:\n{fname}")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to export profile.")
+    
+    def _rename_profile(self):
+        """Rename the selected profile."""
+        current = self.profile_list.currentItem()
+        if not current:
+            QMessageBox.warning(self, "No Selection", "Please select a profile to rename.")
+            return
+        
+        old_name = current.data(Qt.UserRole)
+        new_name, ok = QInputDialog.getText(self, "Rename Profile",
+            f"Enter new name for '{old_name}':", QLineEdit.Normal, old_name)
+        if not ok or not new_name.strip() or new_name.strip() == old_name:
+            return
+        
+        if self.config.rename_profile(old_name, new_name.strip()):
+            self._load_profile_list()
+            if self.parent_window and hasattr(self.parent_window, '_populate_profile_dropdown'):
+                self.parent_window._populate_profile_dropdown()
+            QMessageBox.information(self, "Renamed", f"Profile renamed to '{new_name.strip()}'.")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to rename profile.")
+    
+    def _delete_profile(self):
+        """Delete the selected profile."""
+        current = self.profile_list.currentItem()
+        if not current:
+            QMessageBox.warning(self, "No Selection", "Please select a profile to delete.")
+            return
+        
+        name = current.data(Qt.UserRole)
+        if name == self.config.get_active_profile():
+            QMessageBox.warning(self, "Cannot Delete", 
+                "Cannot delete the active profile.\nSwitch to another profile first.")
+            return
+        
+        reply = QMessageBox.question(self, "Delete Profile?",
+            f"Delete profile '{name}'?\nThis cannot be undone.",
+            QMessageBox.Yes | QMessageBox.No)
+        if reply != QMessageBox.Yes:
+            return
+        
+        if self.config.delete_profile(name):
+            self._load_profile_list()
+            if self.parent_window and hasattr(self.parent_window, '_populate_profile_dropdown'):
+                self.parent_window._populate_profile_dropdown()
+        else:
+            QMessageBox.warning(self, "Error", "Failed to delete profile.")
+
     def _remove_display_column(self):
         """Remove the selected display column."""
         current = self.display_list.currentRow()

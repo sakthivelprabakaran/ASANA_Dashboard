@@ -1085,7 +1085,7 @@ class MainWindow(QMainWindow):
         """
         if not brd_data or len(brd_data) < 2:
             logger.info(f"[MATCH] No BRD data for scenario='{scenario}' (brd_data len={len(brd_data) if brd_data else 0})")
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
         
         logger.info(f"[MATCH] scenario='{scenario}', device='{device}', perf_idx={perf_idx}, prev_idx={prev_idx}, "
                     f"brd_rows={len(brd_data)}, template_sheet='{template_sheet}'")
@@ -1227,7 +1227,7 @@ class MainWindow(QMainWindow):
                         skipped_template += 1
                         continue
                         
-                    brd_match = {'perf_value': '-', 'prev_value': '-'}
+                    brd_match = {'perf_value': 'Check', 'prev_value': 'Check'}
                     if brd_data and len(brd_data) > 1:
                         brd_match = self._match_brd_for_task(
                             scenario, device, row, template_df, template_sheet,
@@ -1394,7 +1394,7 @@ class MainWindow(QMainWindow):
                     if not self._is_device_applicable_in_template(template_row, device):
                         continue
                         
-                    brd_match = {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+                    brd_match = {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
                     if brd_data and len(brd_data) > 1:
                         brd_match = self._match_brd_for_task(
                             scenario, device, template_row, template_df, template_sheet,

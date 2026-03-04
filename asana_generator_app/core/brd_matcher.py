@@ -35,37 +35,38 @@ class BrdMatcher:
     @staticmethod
     def sanitize_numeric_value(value: Any) -> str:
         """
-        Sanitize BRD values to ensure only numeric values are returned.
-        Converts text values like 'NA', 'Blocked', 'YTU' to '0'.
-        
-        Args:
-            value: Raw value from BRD cell
-            
-        Returns:
-            '0' if non-numeric, string representation of number if numeric, '-' if empty
+        Sanitize BRD values for Asana CSV compatibility.
+        - Empty/None/nan → '0'
+        - Text like NA, Blocked, YTU → '0'
+        - Numeric values → rounded to 3 decimal places
+        - No hyphens ever (Asana import doesn't accept them)
         """
         if value is None or str(value).strip() == '':
-            return '-'
+            return '0'
         
         val_str = str(value).strip().lower()
         
         # Check for empty/nan values
         if val_str in ['', 'nan', 'none']:
-            return '-'
+            return '0'
         
         # Check for text values that should become '0'
-        text_values = ['na', 'n/a', 'blocked', 'ytu', 'yet to update', 'tbd', 'to be determined']
+        text_values = ['na', 'n/a', 'blocked', 'ytu', 'yet to update', 'tbd', 'to be determined', '-']
         if val_str in text_values:
             return '0'
         
         # Try to parse as number
         try:
-            # Remove any commas (e.g., "1,234" -> "1234")
             cleaned = val_str.replace(',', '')
-            float(cleaned)  # Test if it's numeric
-            return cleaned  # Return the numeric string
+            num = float(cleaned)
+            # Round to 3 decimal places
+            rounded = round(num, 3)
+            # Format: remove trailing zeros but keep up to 3 decimals
+            if rounded == int(rounded):
+                return str(int(rounded))  # e.g., 2.0 -> "2"
+            else:
+                return f"{rounded:.3f}".rstrip('0').rstrip('.')  # e.g., 1.286, 2.04
         except ValueError:
-            # Not a number - return '0' for any other text
             return '0'
 
 
@@ -144,7 +145,7 @@ class BrdMatcher:
         """
         # Default result - if no BRD data, task is still applicable (just no BRD values)
         if not brd_data or not scenario_name or len(brd_data) < 2:
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
 
         # Check both first and second rows for headers (BRDs often have multi-row headers)
         # UPDATED: Scan first 10 rows to find "Performance Scenario" column
@@ -207,7 +208,7 @@ class BrdMatcher:
 
         # If we can't find scenario column, return applicable with no values
         if scenario_col_idx == -1:
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
 
         # Normalize the input scenario name
         normalized_scenario = self.normalize_scenario_name(scenario_name)
@@ -246,7 +247,7 @@ class BrdMatcher:
                        f"prev_col={prev_col_index} (in_range={prev_col_index < len(row)})")
             
             # Found a match! Extract and sanitize values (NO device filtering here)
-            perf_value = '-'
+            perf_value = 'Check'
             if perf_col_index != -1 and perf_col_index < len(row):
                 val = row[perf_col_index]
                 perf_value = self.sanitize_numeric_value(val)
@@ -254,7 +255,7 @@ class BrdMatcher:
             else:
                 logger.info(f"    perf col {perf_col_index} OUT OF RANGE (row has {len(row)} cols)")
 
-            prev_value = '-'
+            prev_value = 'Check'
             if prev_col_index != -1 and prev_col_index < len(row):
                 val = row[prev_col_index]
                 prev_value = self.sanitize_numeric_value(val)
@@ -270,7 +271,7 @@ class BrdMatcher:
 
         # No match found in BRD - task is still applicable, just no BRD values
         logger.info(f"  ✗ NO MATCH found for '{normalized_scenario}' in {len(brd_data)-start_row} data rows")
-        return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
 
     def get_brd_data_for_oobe_task(self, scenario_name: str, device: str,
                                     component: str, sub_priority: str,
@@ -302,7 +303,7 @@ class BrdMatcher:
         """
         # Default result
         if not brd_data or not scenario_name or len(brd_data) < 2:
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
 
         # Find scenario column (same as standard matching)
         headers0 = brd_data[0] if len(brd_data) > 0 else []
@@ -325,7 +326,7 @@ class BrdMatcher:
         if scenario_col_idx == -1:
             if debug:
                 print(f"[DEBUG OOBE] No scenario column found")
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
 
         # Find OOBE-specific columns
         component_col, priority_col = self.find_oobe_columns(brd_data)
@@ -380,7 +381,7 @@ class BrdMatcher:
                 if component_col == -1:
                     # Component column not found in BRD - can't match
                     print(f"❌ Component column NOT FOUND in BRD!")
-                    return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+                    return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
                 
                 row_component = str(row[component_col] if component_col < len(row) else '').strip()
                 
@@ -389,12 +390,12 @@ class BrdMatcher:
 
             # All criteria matched!
             # Extract and sanitize values
-            perf_value = '-'
+            perf_value = 'Check'
             if final_perf_col != -1 and final_perf_col < len(row):
                 raw_perf = row[final_perf_col]
                 perf_value = self.sanitize_numeric_value(raw_perf)
 
-            prev_value = '-'
+            prev_value = 'Check'
             if final_prev_col != -1 and final_prev_col < len(row):
                 raw_prev = row[final_prev_col]
                 prev_value = self.sanitize_numeric_value(raw_prev)
@@ -406,7 +407,7 @@ class BrdMatcher:
             }
 
         # No match found
-        return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+        return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
 
     def find_new_feature_column(self, brd_data: List[List[Any]]) -> int:
         """
@@ -468,7 +469,7 @@ class BrdMatcher:
             Dict with {applicable, perf_value, prev_value}
         """
         if not brd_data or not scenario_name or len(brd_data) < 2:
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
         
         # Find the New Feature column
         feature_col_idx = self.find_new_feature_column(brd_data)
@@ -531,7 +532,7 @@ class BrdMatcher:
         
         if scenario_col_idx == -1:
             logger.info(f"New Feature match: no scenario column found")
-            return {'applicable': True, 'perf_value': '-', 'prev_value': '-'}
+            return {'applicable': True, 'perf_value': 'Check', 'prev_value': 'Check'}
         
         # Normalize inputs
         normalized_scenario = self.normalize_scenario_name(scenario_name)
@@ -575,14 +576,14 @@ class BrdMatcher:
                 continue
             
             # Match found! Extract values
-            perf_value = '-'
+            perf_value = 'Check'
             if perf_col_index != -1 and perf_col_index < len(row):
                 perf_value = self.sanitize_numeric_value(row[perf_col_index])
                 logger.info(f"    ✓ perf raw='{row[perf_col_index]}' -> '{perf_value}'")
             else:
                 logger.info(f"    perf col {perf_col_index} OUT OF RANGE (row has {len(row)} cols)")
             
-            prev_value = '-'
+            prev_value = 'Check'
             if prev_col_index != -1 and prev_col_index < len(row):
                 prev_value = self.sanitize_numeric_value(row[prev_col_index])
                 logger.info(f"    ✓ prev raw='{row[prev_col_index]}' -> '{prev_value}'")

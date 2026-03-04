@@ -1,0 +1,108 @@
+{
+  "devices": [],
+  "csv_fields": {
+    "core_fields": [
+      "Created At",
+      "Completed At",
+      "Last Modified",
+      "Name",
+      "Section/Column",
+      "Assignee",
+      "Assignee Email",
+      "Start Date",
+      "Due Date",
+      "Tags",
+      "Notes",
+      "Projects",
+      "Parent task",
+      "Blocked By (Dependencies)",
+      "Blocking (Dependencies)"
+    ],
+    "performance_fields": [],
+    "status_fields": [],
+    "deviation_fields": [],
+    "iteration_fields": [],
+    "meta_fields": [
+      "﻿Task ID",
+      "Priority",
+      "Task Progress",
+      "PASS FAIL",
+      "Case count",
+      "Logs"
+    ]
+  },
+  "display_columns": [
+    {
+      "key": "Parent task",
+      "label": "Parent Task",
+      "visible": true
+    },
+    {
+      "key": "Name",
+      "label": "Scenario",
+      "visible": true
+    },
+    {
+      "key": "﻿Task ID",
+      "label": "﻿Task ID",
+      "visible": true
+    },
+    {
+      "key": "Priority",
+      "label": "Priority",
+      "visible": true
+    },
+    {
+      "key": "Task Progress",
+      "label": "Task Progress",
+      "visible": true
+    },
+    {
+      "key": "PASS FAIL",
+      "label": "PASS FAIL",
+      "visible": true
+    },
+    {
+      "key": "Case count",
+      "label": "Case count",
+      "visible": true
+    },
+    {
+      "key": "Logs",
+      "label": "Logs",
+      "visible": true
+    }
+  ],
+  "export_headers": [
+    "﻿Task ID",
+    "Created At",
+    "Completed At",
+    "Last Modified",
+    "Name",
+    "Section/Column",
+    "Assignee",
+    "Assignee Email",
+    "Start Date",
+    "Due Date",
+    "Tags",
+    "Notes",
+    "Projects",
+    "Parent task",
+    "Blocked By (Dependencies)",
+    "Blocking (Dependencies)",
+    "Priority",
+    "Task Progress",
+    "PASS FAIL",
+    "Case count",
+    "Logs"
+  ],
+  "thresholds": {
+    "green_max_deviation": 0.005,
+    "yellow_max_deviation": 0.1
+  },
+  "default_export_values": {},
+  "assignees": [],
+  "profile_name": "Sample Profile",
+  "created_at": "2026-03-03",
+  "created_from": "Engineering_project_plan.csv"
+}

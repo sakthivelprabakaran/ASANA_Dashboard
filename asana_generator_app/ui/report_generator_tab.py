@@ -15,6 +15,7 @@ from core.csv_importer import CsvImporter
 from core.brd_writer import BrdWriter
 from core.data_loader import DataLoader
 from core.config_manager import ConfigManager
+from core.brd_matcher import BrdMatcher
 
 logger = logging.getLogger('AsanaGenerator.ReportGenerator')
 
@@ -212,6 +213,14 @@ class ReportGeneratorTab(QWidget):
         self.selected_target_col = {"name": "", "columnIndex": -1}
         self.filtered_tasks = []
         
+        # Audit Reconciliation state
+        self.audit_brd_file_path = None
+        self.audit_brd_sheets = {}
+        self.audit_selected_col = {"name": "", "columnIndex": -1}
+        self.audit_comparison_data = []  # List of comparison dicts
+        self.original_counts = {'green': 0, 'yellow': 0, 'red': 0, 'na': 0}
+        self.audited_counts = {'green': 0, 'yellow': 0, 'red': 0, 'na': 0}
+        
         # Debounce timer for search
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
@@ -406,6 +415,89 @@ class ReportGeneratorTab(QWidget):
             QPushButton:hover { background-color: #059669; }
         """)
         left_layout.addWidget(self.btn_write_brd)
+        
+        # --- STEP 4: AUDIT RECONCILIATION ---
+        step4_label = QLabel("STEP 4: AUDIT RECONCILIATION")
+        step4_label.setStyleSheet("color: #ea580c; font-weight: bold; font-size: 11px; letter-spacing: 1px; margin-top: 12px;")
+        left_layout.addWidget(step4_label)
+        
+        audit_frame = QFrame()
+        audit_frame.setStyleSheet("background: #ffffff; border: 1px solid #fed7aa; border-radius: 6px;")
+        audit_layout = QVBoxLayout(audit_frame)
+        audit_layout.setContentsMargins(10, 10, 10, 10)
+        audit_layout.setSpacing(8)
+        
+        # Audit description
+        audit_desc = QLabel("📋 Load audited BRD to compare\ncounts after audit changes")
+        audit_desc.setStyleSheet("color: #9a3412; font-size: 10px;")
+        audit_desc.setWordWrap(True)
+        audit_layout.addWidget(audit_desc)
+        
+        # Audited BRD File
+        audit_file_row = QHBoxLayout()
+        audit_file_row.addWidget(QLabel("📂 Audited BRD:"))
+        self.btn_audit_brd = QPushButton("Select...")
+        self.btn_audit_brd.clicked.connect(self.load_audit_brd)
+        self.btn_audit_brd.setCursor(Qt.PointingHandCursor)
+        self.btn_audit_brd.setMaximumWidth(80)
+        self.btn_audit_brd.setStyleSheet("padding: 4px 10px; font-size: 10px; background-color: #ea580c; color: white; border-radius: 4px;")
+        audit_file_row.addStretch()
+        audit_file_row.addWidget(self.btn_audit_brd)
+        audit_layout.addLayout(audit_file_row)
+        
+        self.lbl_audit_brd = QLabel("No file loaded")
+        self.lbl_audit_brd.setStyleSheet("color: #94a3b8; font-size: 10px;")
+        self.lbl_audit_brd.setWordWrap(True)
+        audit_layout.addWidget(self.lbl_audit_brd)
+        
+        # Audit BRD Sheet
+        audit_layout.addWidget(QLabel("Sheet:"))
+        self.combo_audit_sheet = QComboBox()
+        self.combo_audit_sheet.setPlaceholderText("Select...")
+        audit_layout.addWidget(self.combo_audit_sheet)
+        
+        # Audit column selection via Spreadsheet Viewer
+        self.btn_audit_select_col = QPushButton("🎯 Select Audited Column")
+        self.btn_audit_select_col.clicked.connect(self.select_audit_column)
+        self.btn_audit_select_col.setCursor(Qt.PointingHandCursor)
+        self.btn_audit_select_col.setStyleSheet("""
+            QPushButton {
+                background-color: #ea580c;
+                border: none; border-radius: 6px;
+                color: white; font-weight: bold; font-size: 11px;
+                padding: 8px;
+            }
+            QPushButton:hover { background-color: #c2410c; }
+        """)
+        audit_layout.addWidget(self.btn_audit_select_col)
+        
+        # Audit column display
+        audit_col_box = QFrame()
+        audit_col_box.setStyleSheet("background: #fff7ed; border: 1px solid #fed7aa; border-radius: 4px;")
+        audit_col_inner = QVBoxLayout(audit_col_box)
+        audit_col_inner.setContentsMargins(8, 6, 8, 6)
+        audit_col_inner.addWidget(QLabel("Audited Column:"))
+        self.lbl_audit_col = QLabel("Not selected")
+        self.lbl_audit_col.setStyleSheet("color: #ea580c; font-weight: bold; font-size: 10px;")
+        self.lbl_audit_col.setWordWrap(True)
+        audit_col_inner.addWidget(self.lbl_audit_col)
+        audit_layout.addWidget(audit_col_box)
+        
+        # Recalculate button
+        self.btn_recalculate = QPushButton("🔄 Recalculate & Compare")
+        self.btn_recalculate.clicked.connect(self.run_audit_reconciliation)
+        self.btn_recalculate.setCursor(Qt.PointingHandCursor)
+        self.btn_recalculate.setMinimumHeight(40)
+        self.btn_recalculate.setStyleSheet("""
+            QPushButton {
+                background-color: #ea580c; border: none; border-radius: 6px;
+                color: white; font-weight: bold; font-size: 13px;
+            }
+            QPushButton:hover { background-color: #c2410c; }
+        """)
+        audit_layout.addWidget(self.btn_recalculate)
+        
+        left_layout.addWidget(audit_frame)
         
         left_layout.addStretch()
         
@@ -962,3 +1054,509 @@ class ReportGeneratorTab(QWidget):
             logger.error(f"Write operation failed: {e}")
             QMessageBox.critical(self, "Write Error", f"Failed to write to BRD:\n{str(e)}")
             return None
+
+    # ====================
+    # AUDIT RECONCILIATION
+    # ====================
+
+    def _detect_scenario_column(self, brd_data, target_col_index):
+        """
+        Auto-detect the scenario column in BRD data (nearest to and before target column).
+        Returns the scenario column index or -1 if not found.
+        """
+        scan_rows = brd_data[:10]
+
+        def is_scenario_col(h):
+            h_str = str(h or '').lower()
+            return ('performance scenario' in h_str or
+                    'performance scanrio' in h_str or
+                    'scenario name' in h_str or
+                    h_str == 'name')
+
+        scenario_cols = set()
+        for row in scan_rows:
+            for c_idx, val in enumerate(row):
+                if is_scenario_col(val):
+                    scenario_cols.add(c_idx)
+
+        if not scenario_cols:
+            return -1
+
+        sorted_cols = sorted(scenario_cols)
+        before = [c for c in sorted_cols if c < target_col_index]
+        return before[-1] if before else sorted_cols[0]
+
+    def load_audit_brd(self):
+        """Load the audited BRD file for reconciliation."""
+        fname, _ = QFileDialog.getOpenFileName(
+            self, "Select Audited BRD File", "", "Excel Files (*.xlsx *.xls);;All Files (*)"
+        )
+        if not fname:
+            return
+
+        try:
+            self.audit_brd_file_path = fname
+            self.audit_brd_sheets = DataLoader.load_all_sheets_as_raw(fname)
+
+            self.lbl_audit_brd.setText(f"✓ {os.path.basename(fname)}")
+            self.lbl_audit_brd.setStyleSheet("color: #ea580c; font-size: 10px; font-weight: bold;")
+
+            self.combo_audit_sheet.clear()
+            for name, data in self.audit_brd_sheets.items():
+                row_count = len(data) - 1 if data else 0
+                self.combo_audit_sheet.addItem(f"{name} ({row_count} rows)", name)
+
+            self.lbl_status.setText(f"Audited BRD loaded: {os.path.basename(fname)}")
+            logger.info(f"Audited BRD loaded: {os.path.basename(fname)}")
+
+        except Exception as e:
+            logger.error(f"Failed to load audited BRD: {e}")
+            QMessageBox.critical(self, "Error", f"Failed to load audited BRD:\n{str(e)}")
+
+    def select_audit_column(self):
+        """Open Spreadsheet Viewer to select the audited Average column."""
+        sheet_name = self.combo_audit_sheet.currentData()
+
+        if not self.audit_brd_sheets or not sheet_name:
+            QMessageBox.warning(self, "No Audited BRD Data",
+                "Please load an audited BRD file and select a sheet first.")
+            return
+
+        brd_data = self.audit_brd_sheets.get(sheet_name, [])
+        if not brd_data:
+            QMessageBox.warning(self, "Empty Sheet", "Selected sheet has no data.")
+            return
+
+        from ui.brd_viewer_dialog import BrdViewerDialog
+
+        dialog = BrdViewerDialog(brd_data, self, initial_search="",
+                                 single_column_mode=True,
+                                 single_column_label="🎯 Audited Average Column")
+
+        if dialog.exec_():
+            selection = dialog.get_selection()
+            self.audit_selected_col = {
+                "name": selection['perf'].get('name', ''),
+                "columnIndex": selection['perf'].get('index', -1)
+            }
+
+            col_name = self.audit_selected_col['name']
+            col_idx = self.audit_selected_col['columnIndex']
+
+            if col_idx >= 0:
+                self.lbl_audit_col.setText(f"Col {col_idx}: {col_name[:30]}")
+                self.lbl_audit_col.setStyleSheet("color: #ea580c; font-weight: bold; font-size: 10px;")
+                self.lbl_status.setText(f"Audited column selected: {col_name}")
+            else:
+                self.lbl_audit_col.setText("Not selected")
+
+    def run_audit_reconciliation(self):
+        """
+        Run the audit reconciliation:
+        1. Read audited values from BRD using scenario matching
+        2. Compare with original CSV Average values
+        3. Recalculate deviations and colors
+        4. Show comparison dialog
+        """
+        # Validate prerequisites
+        if not self.filtered_tasks:
+            QMessageBox.warning(self, "No CSV Data",
+                "Please import a CSV and filter data first (Steps 1-2).")
+            return
+
+        if not self.audit_brd_sheets:
+            QMessageBox.warning(self, "No Audited BRD",
+                "Please load an audited BRD file first.")
+            return
+
+        audit_sheet_name = self.combo_audit_sheet.currentData()
+        if not audit_sheet_name:
+            QMessageBox.warning(self, "No Sheet", "Please select an audited BRD sheet.")
+            return
+
+        audit_col_idx = self.audit_selected_col.get('columnIndex', -1)
+        if audit_col_idx < 0:
+            QMessageBox.warning(self, "No Audited Column",
+                "Please select the audited Average column via Spreadsheet Viewer.")
+            return
+
+        audit_brd_data = self.audit_brd_sheets.get(audit_sheet_name, [])
+        if not audit_brd_data:
+            QMessageBox.warning(self, "Empty Sheet", "Audited BRD sheet has no data.")
+            return
+
+        # Auto-detect scenario column in audited BRD
+        scenario_col_idx = self._detect_scenario_column(audit_brd_data, audit_col_idx)
+        if scenario_col_idx < 0:
+            QMessageBox.warning(self, "No Scenario Column",
+                "Could not find 'Performance Scenario' column in audited BRD sheet.")
+            return
+
+        try:
+            self._execute_reconciliation(audit_brd_data, audit_sheet_name,
+                                          scenario_col_idx, audit_col_idx)
+        except Exception as e:
+            logger.error(f"Audit reconciliation failed: {e}")
+            QMessageBox.critical(self, "Reconciliation Error",
+                f"Failed to run audit reconciliation:\n{str(e)}")
+
+    def _execute_reconciliation(self, audit_brd_data, audit_sheet_name,
+                                 scenario_col_idx, audit_col_idx):
+        """Execute the reconciliation logic and show the comparison dialog."""
+        matcher = BrdMatcher()
+
+        # Build scenario lookup from audited BRD
+        scenario_lookup = BrdWriter.build_scenario_lookup(audit_brd_data, scenario_col_idx)
+        logger.info(f"Audit reconciliation: {len(scenario_lookup)} scenarios in audited BRD")
+
+        # Read audited BRD rows for value extraction
+        import openpyxl
+        wb = openpyxl.load_workbook(self.audit_brd_file_path, data_only=True, read_only=True)
+        ws = wb[audit_sheet_name]
+        brd_rows = []
+        for row in ws.iter_rows(min_row=1, values_only=True):
+            brd_rows.append(list(row))
+        wb.close()
+
+        # Capture original counts BEFORE reconciliation
+        orig_green, orig_yellow, orig_red, orig_na = 0, 0, 0, 0
+        for t in self.filtered_tasks:
+            avg = t.get('Average', '')
+            if not avg or avg in ['', '-', '0']:
+                orig_na += 1
+            else:
+                color = t.get('_brd_color', '')
+                if color == 'green':
+                    orig_green += 1
+                elif color == 'yellow':
+                    orig_yellow += 1
+                elif color == 'red':
+                    orig_red += 1
+                else:
+                    orig_na += 1
+
+        self.original_counts = {
+            'green': orig_green, 'yellow': orig_yellow,
+            'red': orig_red, 'na': orig_na
+        }
+
+        # Match CSV tasks to audited BRD and read new values
+        comparison_data = []
+        scenario_match_count = {}
+        matched_count = 0
+        unmatched_count = 0
+
+        for task in self.filtered_tasks:
+            scenario_name = task.get('Name', '')
+            original_avg_str = task.get('Average', '')
+            perf_brd_str = task.get('Perf_BRD', '')
+            parent = task.get('Parent task', '')
+            original_color = task.get('_brd_color', '')
+
+            normalized = matcher.normalize_scenario_name(scenario_name)
+
+            comp = {
+                'scenario': scenario_name,
+                'parent': parent,
+                'original_avg': original_avg_str,
+                'audited_avg': '',
+                'perf_brd': perf_brd_str,
+                'original_color': original_color,
+                'audited_color': '',
+                'original_status': task.get('BRD Status', ''),
+                'audited_status': '',
+                'changed': False,
+                'matched': False,
+            }
+
+            if normalized in scenario_lookup:
+                brd_rows_list = scenario_lookup[normalized]
+                occurrence = scenario_match_count.get(normalized, 0)
+
+                if occurrence < len(brd_rows_list):
+                    row_num = brd_rows_list[occurrence]
+                    scenario_match_count[normalized] = occurrence + 1
+                    row_idx = row_num - 1  # 0-based
+
+                    # Read the audited value
+                    audited_val = None
+                    if row_idx < len(brd_rows) and audit_col_idx < len(brd_rows[row_idx]):
+                        audited_val = brd_rows[row_idx][audit_col_idx]
+
+                    audited_avg_str = str(audited_val) if audited_val is not None else ''
+                    if audited_avg_str.lower() in ['none', 'nan', '']:
+                        audited_avg_str = ''
+
+                    comp['audited_avg'] = audited_avg_str
+                    comp['matched'] = True
+                    matched_count += 1
+
+                    # Recalculate deviation and color for audited value
+                    audited_num = CsvImporter._parse_number(audited_avg_str)
+                    perf_brd_num = CsvImporter._parse_number(perf_brd_str)
+
+                    if audited_num is not None and perf_brd_num is not None and perf_brd_num != 0:
+                        dev = (audited_num - perf_brd_num) / perf_brd_num
+                        comp['audited_color'] = CsvImporter._get_color(dev)
+                        comp['audited_status'] = CsvImporter._get_status(dev)
+                    else:
+                        comp['audited_color'] = ''
+                        comp['audited_status'] = ''
+
+                    # Detect change
+                    comp['changed'] = (comp['original_color'] != comp['audited_color']
+                                       and comp['audited_color'] != '')
+                else:
+                    unmatched_count += 1
+            else:
+                unmatched_count += 1
+
+            comparison_data.append(comp)
+
+        self.audit_comparison_data = comparison_data
+
+        # Calculate audited counts
+        aud_green, aud_yellow, aud_red, aud_na = 0, 0, 0, 0
+        for c in comparison_data:
+            if c['matched'] and c['audited_avg']:
+                color = c['audited_color']
+                if color == 'green':
+                    aud_green += 1
+                elif color == 'yellow':
+                    aud_yellow += 1
+                elif color == 'red':
+                    aud_red += 1
+                else:
+                    aud_na += 1
+            else:
+                aud_na += 1
+
+        self.audited_counts = {
+            'green': aud_green, 'yellow': aud_yellow,
+            'red': aud_red, 'na': aud_na
+        }
+
+        changed_count = sum(1 for c in comparison_data if c['changed'])
+
+        logger.info(f"Audit reconciliation complete: {matched_count} matched, "
+                    f"{unmatched_count} unmatched, {changed_count} changed")
+
+        self.lbl_status.setText(
+            f"🔄 Audit: {matched_count} matched, {changed_count} changed | "
+            f"Before: G{orig_green}/Y{orig_yellow}/R{orig_red} → "
+            f"After: G{aud_green}/Y{aud_yellow}/R{aud_red}"
+        )
+
+        # Show comparison dialog
+        self._show_audit_comparison_dialog(comparison_data, matched_count,
+                                            unmatched_count, changed_count)
+
+    def _show_audit_comparison_dialog(self, comparison_data, matched_count,
+                                       unmatched_count, changed_count):
+        """Show the audit comparison dialog with before/after summary and detailed table."""
+        from PyQt5.QtWidgets import (QDialog, QTableWidget, QTableWidgetItem,
+                                     QTabWidget)
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"🔄 Audit Reconciliation — {matched_count} matched, {changed_count} changed")
+        dialog.setMinimumSize(1200, 700)
+        dlg_layout = QVBoxLayout(dialog)
+        dlg_layout.setSpacing(12)
+        dlg_layout.setContentsMargins(20, 20, 20, 20)
+
+        # === SUMMARY: BEFORE / AFTER / DELTA ===
+        summary_widget = QWidget()
+        summary_widget.setStyleSheet("background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px;")
+        summary_layout = QVBoxLayout(summary_widget)
+        summary_layout.setContentsMargins(16, 12, 16, 12)
+        summary_layout.setSpacing(8)
+
+        summary_title = QLabel("📊 Audit Reconciliation Summary")
+        summary_title.setStyleSheet("color: #1e293b; font-size: 16px; font-weight: bold; border: none;")
+        summary_layout.addWidget(summary_title)
+
+        # Three rows: BEFORE, AFTER, DELTA
+        oc = self.original_counts
+        ac = self.audited_counts
+
+        def make_count_row(label, green, yellow, red, na, is_delta=False):
+            row = QHBoxLayout()
+            row.setSpacing(12)
+            lbl = QLabel(f"<b>{label}</b>")
+            lbl.setMinimumWidth(80)
+            lbl.setStyleSheet("color: #475569; font-size: 13px; border: none;")
+            row.addWidget(lbl)
+
+            prefix = lambda v: f"+{v}" if v > 0 and is_delta else str(v)
+
+            g = QLabel(f"🟢 GREEN: {prefix(green)}")
+            g.setStyleSheet("color: #FFFFFF; background: #00B050; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 12px;")
+            row.addWidget(g)
+
+            y = QLabel(f"🟡 YELLOW: {prefix(yellow)}")
+            y.setStyleSheet("color: #000000; background: #FFFF00; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 12px;")
+            row.addWidget(y)
+
+            r = QLabel(f"🔴 RED: {prefix(red)}")
+            r.setStyleSheet("color: #FFFFFF; background: #FF0000; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 12px;")
+            row.addWidget(r)
+
+            n = QLabel(f"⬜ NA: {prefix(na)}")
+            n.setStyleSheet("color: #64748b; background: #e2e8f0; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 12px;")
+            row.addWidget(n)
+
+            total = green + yellow + red + na
+            t = QLabel(f"📊 Total: {total}")
+            t.setStyleSheet("color: #FFFFFF; background: #475569; padding: 4px 12px; border-radius: 4px; font-weight: bold; font-size: 12px;")
+            row.addWidget(t)
+
+            row.addStretch()
+            return row
+
+        summary_layout.addLayout(make_count_row("BEFORE:",
+            oc['green'], oc['yellow'], oc['red'], oc['na']))
+        summary_layout.addLayout(make_count_row("AFTER:",
+            ac['green'], ac['yellow'], ac['red'], ac['na']))
+
+        delta_g = ac['green'] - oc['green']
+        delta_y = ac['yellow'] - oc['yellow']
+        delta_r = ac['red'] - oc['red']
+        delta_na = ac['na'] - oc['na']
+        summary_layout.addLayout(make_count_row("DELTA:",
+            delta_g, delta_y, delta_r, delta_na, is_delta=True))
+
+        # Pass rate comparison
+        orig_applicable = oc['green'] + oc['yellow'] + oc['red']
+        aud_applicable = ac['green'] + ac['yellow'] + ac['red']
+        orig_pass_rate = ((oc['green'] + oc['yellow']) / orig_applicable * 100) if orig_applicable > 0 else 0
+        aud_pass_rate = ((ac['green'] + ac['yellow']) / aud_applicable * 100) if aud_applicable > 0 else 0
+
+        pass_info = QLabel(
+            f"Pass Rate: <b>{orig_pass_rate:.0f}%</b> → <b>{aud_pass_rate:.0f}%</b>  |  "
+            f"Matched: {matched_count}  |  Unmatched: {unmatched_count}  |  "
+            f"Changed: <b style='color: #ea580c;'>{changed_count}</b>"
+        )
+        pass_info.setStyleSheet("color: #475569; font-size: 13px; padding: 4px; border: none;")
+        summary_layout.addWidget(pass_info)
+
+        dlg_layout.addWidget(summary_widget)
+
+        # === FILTER BAR ===
+        filter_bar = QHBoxLayout()
+        filter_bar.addWidget(QLabel("Filter:"))
+        combo_filter = QComboBox()
+        combo_filter.addItems(["All Scenarios", "Changed Only", "Unchanged Only",
+                               "GREEN → YELLOW", "GREEN → RED",
+                               "YELLOW → RED", "YELLOW → GREEN",
+                               "RED → YELLOW", "RED → GREEN"])
+        filter_bar.addWidget(combo_filter)
+        filter_bar.addStretch()
+        dlg_layout.addLayout(filter_bar)
+
+        # === COMPARISON TABLE ===
+        columns = ["Scenario", "Parent Task", "Original Avg", "Audited Avg",
+                    "Perf BRD", "Original Color", "Audited Color", "Status", "Changed"]
+        comp_table = QTableWidget(len(comparison_data), len(columns))
+        comp_table.setHorizontalHeaderLabels(columns)
+        comp_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        comp_table.setAlternatingRowColors(True)
+        comp_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
+        comp_table.setSelectionBehavior(QAbstractItemView.SelectRows)
+        comp_table.setStyleSheet("""
+            QTableWidget {
+                gridline-color: #e2e8f0;
+                border: 1px solid #e2e8f0;
+                border-radius: 6px;
+            }
+            QTableWidget::item { padding: 4px; }
+            QHeaderView::section {
+                background-color: #fff7ed;
+                color: #9a3412;
+                padding: 6px;
+                border: none;
+                border-bottom: 2px solid #fed7aa;
+                font-weight: bold;
+            }
+        """)
+
+        color_map = {
+            'green': ('#00B050', '#FFFFFF'),
+            'yellow': ('#FFFF00', '#000000'),
+            'red': ('#FF0000', '#FFFFFF'),
+        }
+
+        def populate_table(data):
+            comp_table.setRowCount(len(data))
+            for i, c in enumerate(data):
+                comp_table.setItem(i, 0, QTableWidgetItem(c['scenario']))
+                comp_table.setItem(i, 1, QTableWidgetItem(c['parent']))
+                comp_table.setItem(i, 2, QTableWidgetItem(c['original_avg']))
+                comp_table.setItem(i, 3, QTableWidgetItem(c['audited_avg']))
+                comp_table.setItem(i, 4, QTableWidgetItem(c['perf_brd']))
+
+                # Original color cell
+                orig_item = QTableWidgetItem(c['original_color'].upper() if c['original_color'] else 'NA')
+                if c['original_color'] in color_map:
+                    bg, fg = color_map[c['original_color']]
+                    orig_item.setBackground(QColor(bg))
+                    orig_item.setForeground(QColor(fg))
+                comp_table.setItem(i, 5, orig_item)
+
+                # Audited color cell
+                aud_item = QTableWidgetItem(c['audited_color'].upper() if c['audited_color'] else 'NA')
+                if c['audited_color'] in color_map:
+                    bg, fg = color_map[c['audited_color']]
+                    aud_item.setBackground(QColor(bg))
+                    aud_item.setForeground(QColor(fg))
+                comp_table.setItem(i, 6, aud_item)
+
+                # Status
+                status_text = c.get('audited_status', '') or c.get('original_status', '')
+                comp_table.setItem(i, 7, QTableWidgetItem(status_text))
+
+                # Changed indicator
+                changed_item = QTableWidgetItem("⚠️ YES" if c['changed'] else "—")
+                if c['changed']:
+                    changed_item.setBackground(QColor('#fef3c7'))
+                    changed_item.setForeground(QColor('#92400e'))
+                comp_table.setItem(i, 8, changed_item)
+
+            comp_table.resizeColumnsToContents()
+
+        populate_table(comparison_data)
+
+        def on_filter_changed(filter_text):
+            if filter_text == "All Scenarios":
+                filtered = comparison_data
+            elif filter_text == "Changed Only":
+                filtered = [c for c in comparison_data if c['changed']]
+            elif filter_text == "Unchanged Only":
+                filtered = [c for c in comparison_data if not c['changed']]
+            elif "→" in filter_text:
+                parts = filter_text.split("→")
+                from_color = parts[0].strip().lower()
+                to_color = parts[1].strip().lower()
+                filtered = [c for c in comparison_data
+                           if c['original_color'] == from_color
+                           and c['audited_color'] == to_color]
+            else:
+                filtered = comparison_data
+            populate_table(filtered)
+
+        combo_filter.currentTextChanged.connect(on_filter_changed)
+
+        dlg_layout.addWidget(comp_table, 1)
+
+        # === CLOSE BUTTON ===
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+
+        btn_close = QPushButton("Close")
+        btn_close.clicked.connect(dialog.accept)
+        btn_close.setCursor(Qt.PointingHandCursor)
+        btn_close.setStyleSheet("padding: 10px 30px; background: #3b82f6; color: white; "
+                                "border-radius: 6px; font-weight: bold; font-size: 13px;")
+        btn_row.addWidget(btn_close)
+        dlg_layout.addLayout(btn_row)
+
+        dialog.exec_()

@@ -104,6 +104,18 @@ class BrdWriter:
         Build normalized scenario → list of row indices mapping from BRD data.
         Supports multiple BRD rows with the same scenario name (matched in order).
         """
+        return BrdWriter.build_scenario_lookup(brd_rows, scenario_col_index)
+
+    @staticmethod
+    def build_scenario_lookup(brd_rows, scenario_col_index):
+        """
+        Build normalized scenario → list of row indices mapping from BRD data.
+        Supports multiple BRD rows with the same scenario name (matched in order).
+        
+        This is a public static method so it can be reused by other modules
+        (e.g., Audit Reconciliation reading values back from audited BRD).
+        """
+        matcher = BrdMatcher()
         scenario_to_rows = {}  # scenario → [row1, row2, ...] (multiple occurrences)
         start_row = 3  # Skip first 2 header rows
         
@@ -111,7 +123,7 @@ class BrdWriter:
             row = brd_rows[row_idx]
             if scenario_col_index < len(row):
                 scenario_raw = row[scenario_col_index]
-                normalized = self.matcher.normalize_scenario_name(scenario_raw)
+                normalized = matcher.normalize_scenario_name(scenario_raw)
                 if normalized:
                     if normalized not in scenario_to_rows:
                         scenario_to_rows[normalized] = []

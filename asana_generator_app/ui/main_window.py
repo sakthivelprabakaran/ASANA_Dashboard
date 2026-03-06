@@ -1259,8 +1259,9 @@ class MainWindow(QMainWindow):
                     'Device': device,
                     'Priority': manual.get('priority', ''),
                     'Est. Time': manual.get('est_time', ''),
-                    'Perf_BRD': '',
-                    'Previous Value': ''
+                    'Perf_BRD': manual.get('perf_brd', ''),
+                    'Previous Value': manual.get('previous_value', ''),
+                    'N-Points': manual.get('n_points', '')
                 }
                 all_tasks.append(task)
         
@@ -1272,7 +1273,7 @@ class MainWindow(QMainWindow):
             return
             
         # Display in table
-        columns = ['Parent Task', 'Scenario', 'Device', 'Priority', 'Est. Time', 'Perf_BRD', 'Previous Value']
+        columns = ['Parent Task', 'Scenario', 'Device', 'Priority', 'Est. Time', 'Perf_BRD', 'Previous Value', 'N-Points']
         model = TaskTableModel(all_tasks, columns)
         self.table.setModel(model)
         self.table.resizeColumnsToContents()
@@ -1435,7 +1436,11 @@ class MainWindow(QMainWindow):
                 task_row['Devices'] = device
                 task_row['Priority'] = manual.get('priority', '')
                 task_row['Estimated time'] = manual.get('est_time', '')
-                # No Perf_BRD, no Previous Value for manual subtasks
+                task_row['Perf_BRD'] = manual.get('perf_brd', '')
+                task_row['Previous Value'] = manual.get('previous_value', '')
+                # N-Points stored as custom field if header exists
+                if 'N-Points' in HEADERS:
+                    task_row['N-Points'] = manual.get('n_points', '')
                 
                 # Set assignee
                 assignee_email = config.get('assigneeEmail', '')
